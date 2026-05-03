@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V4.1 (Rayfield UI + Attachment Mode / Custom Keys)
+-- Ultimate Part Manipulator V4.2 (Rayfield UI + Attachment + NoCollision Preview + Anchored Fix)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -29,18 +29,19 @@ local Settings = {
     PreviewPart = nil,
     PreviewPosition = nil,
     AttachmentStep = 2,
-    AttachedParts = {},
+    AttachedParts = {},       -- { {Part = part, TargetPos = pos} }  (но после Anchored уже не важно)
 }
 
 local AllParts = {}
 
+-- Функция захвата (сохраняем лёгкую массу, но коллизию может менять режим)
 local function RetainPart(part)
     if part:IsA("BasePart") and not part.Anchored then
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then
             return false
         end
         part.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.3, 0.5)
-        part.CanCollide = true
+        part.CanCollide = true   -- по умолчанию включена, в режимах будем менять
         return true
     end
     return false
@@ -68,7 +69,7 @@ end
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V4.1",
+    Name = "Part Manipulator V4.2",
     LoadingTitle = "Part Manipulator",
     LoadingSubtitle = "by DeepSeek AI",
     ConfigurationSaving = { Enabled = false },
@@ -91,6 +92,7 @@ MainTab:CreateButton({
     Callback = function()
         for _, part in pairs(AllParts) do
             if part and part.Parent then
+                part.Anchored = false
                 part.CanCollide = true
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 part.Velocity = Vector3.new(0, 0, 0)
@@ -142,7 +144,15 @@ MainTab:CreateToggle({
             return
         end
         Settings.IsActive = Value
-        if Value then Settings.TornadoMode = false end
+        if Value then
+            Settings.TornadoMode = false
+            -- Для удобства во время удержания отключаем коллизию, чтобы не отталкивало игрока
+            Settings.SelectedPart.CanCollide = false
+        else
+            if Settings.SelectedPart then
+                Settings.SelectedPart.CanCollide = true
+            end
+        end
     end,
 })
 MainTab:CreateToggle({
@@ -167,8 +177,8 @@ MainTab:CreateButton({
         local part = Settings.SelectedPart
         local mousePos = Mouse.Hit.Position
         local direction = (mousePos - part.Position).Unit
+        part.CanCollide = true   -- при броске включаем коллизию
         part.Velocity = direction * Settings.ThrowForce
-        part.CanCollide = true
         Settings.SelectedPart = nil
         Settings.IsActive = false
         Settings.RotateMode = false
@@ -227,6 +237,7 @@ MainTab:CreateButton({
         for _, item in pairs(Settings.AttachedParts) do
             local part = item.Part
             if part and part.Parent then
+                part.Anchored = false
                 part.CanCollide = true
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 part.Velocity = Vector3.new(0, 0, 0)
@@ -246,9 +257,10 @@ Mouse.Button1Down:Connect(function()
     if not char or target:IsDescendantOf(char) then return end
 
     if Settings.AttachmentMode then
-        -- Если уже прикреплена – открепить
+        -- Если уже прикреплена (Anchored) – открепить
         for i, item in pairs(Settings.AttachedParts) do
             if item.Part == target then
+                target.Anchored = false
                 target.CanCollide = true
                 target.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 target.Velocity = Vector3.new(0, 0, 0)
@@ -261,6 +273,7 @@ Mouse.Button1Down:Connect(function()
         -- Начать превью
         if RetainPart(target) then
             Settings.PreviewPart = target
+            Settings.PreviewPart.CanCollide = false   -- отключаем коллизию, чтобы легко позиционировать
             Settings.PreviewPosition = target.Position
             if not table.find(AllParts, target) then
                 table.insert(AllParts, target)
@@ -288,7 +301,7 @@ RunService.Heartbeat:Connect(function()
     if Settings.TornadoMode then
         local angle = tick() * Settings.TornadoSpeed
         for i, part in pairs(AllParts) do
-            if part and part.Parent and not table.find(Settings.AttachedParts, function(item) return item.Part == part end) then
+            if part and part.Parent and not part.Anchored and not table.find(Settings.AttachedParts, function(item) return item.Part == part end) then
                 local offset = i * 2.4
                 local x = math.cos(angle + offset) * Settings.TornadoRadius
                 local z = math.sin(angle + offset) * Settings.TornadoRadius
@@ -311,7 +324,7 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- Удержание
+    -- Удержание выбранной части
     if Settings.IsActive and Settings.SelectedPart and Settings.SelectedPart.Parent and not Settings.AttachmentMode then
         local part = Settings.SelectedPart
         local mousePos = Mouse.Hit.Position
@@ -337,11 +350,12 @@ RunService.Heartbeat:Connect(function()
         Settings.SelectedPart.AngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0)
     end
 
-    -- Прикреплённые
+    -- Прикреплённые части (теперь они Anchored, цикл не нужен, но оставим на случай, если кто-то вручную снимет Anchor)
     for _, item in pairs(Settings.AttachedParts) do
         local part = item.Part
-        local targetPos = item.TargetPos
-        if part and part.Parent then
+        if part and part.Parent and not part.Anchored then
+            -- Если вдруг разъанкорили, попробуем удержать (запасной вариант)
+            local targetPos = item.TargetPos
             local diff = targetPos - part.Position
             if diff.Magnitude > 0.05 then
                 local speed = math.min(diff.Magnitude * 30, 200)
@@ -352,7 +366,7 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- Превью
+    -- Превью часть (строительство) – без коллизии, просто двигаем
     if Settings.PreviewPart and Settings.PreviewPart.Parent and Settings.AttachmentMode then
         local part = Settings.PreviewPart
         local targetPos = Settings.PreviewPosition
@@ -384,13 +398,20 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         elseif key == Enum.KeyCode.Z then
             Settings.PreviewPosition = pos + Vector3.new(-step, 0, 0)  -- Влево
         elseif key == Enum.KeyCode.Return then
-            table.insert(Settings.AttachedParts, {Part = Settings.PreviewPart, TargetPos = Settings.PreviewPosition})
+            local part = Settings.PreviewPart
+            -- Фиксируем: делаем Anchored, возвращаем коллизию, чтобы можно было стоять
+            part.Anchored = true
+            part.CanCollide = true
+            part.Velocity = Vector3.new(0, 0, 0)
+            part.AngularVelocity = Vector3.new(0, 0, 0)
+            table.insert(Settings.AttachedParts, {Part = part, TargetPos = Settings.PreviewPosition})
             Settings.PreviewPart = nil
             Settings.PreviewPosition = nil
-            Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена в воздухе!", Duration = 2 })
+            Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена статично!", Duration = 2 })
         elseif key == Enum.KeyCode.Backspace or key == Enum.KeyCode.Escape then
             local part = Settings.PreviewPart
             if part and part.Parent then
+                part.CanCollide = true
                 part.Velocity = Vector3.new(0, 0, 0)
             end
             Settings.PreviewPart = nil
@@ -405,14 +426,19 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if Settings.SelectedPart then
             Settings.IsActive = not Settings.IsActive
             Settings.TornadoMode = false
+            if Settings.IsActive then
+                Settings.SelectedPart.CanCollide = false
+            else
+                Settings.SelectedPart.CanCollide = true
+            end
         end
     elseif key == Enum.KeyCode.Q then
         if Settings.SelectedPart then
             local part = Settings.SelectedPart
             local mousePos = Mouse.Hit.Position
             local direction = (mousePos - part.Position).Unit
-            part.Velocity = direction * Settings.ThrowForce
             part.CanCollide = true
+            part.Velocity = direction * Settings.ThrowForce
             Settings.SelectedPart = nil
             Settings.IsActive = false
             Settings.RotateMode = false
@@ -464,4 +490,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Part Manipulator V4.1 loaded – Attachment with E/Q/X/Z keys.")
+print("Part Manipulator V4.2 loaded – Anchored attachment, no-collision preview, no more flying parts.")
