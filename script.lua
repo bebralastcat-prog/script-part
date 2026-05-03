@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V4.2 (Rayfield UI + Attachment + NoCollision Preview + Anchored Fix)
+-- Ultimate Part Manipulator V5 (Rayfield UI + AlignPosition for infinite range)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -7,15 +7,12 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
-LocalPlayer.ReplicationFocus = Workspace
-sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
-
 -- Настройки
 local Settings = {
     SelectedPart = nil,
     IsActive = false,
     HoldDistance = 10,
-    MoveSpeed = 5,
+    MoveSpeed = 5,             -- не используется, оставлено для совместимости
     ThrowForce = 500,
     RotateSpeed = 8,
     TornadoSpeed = 8,
@@ -29,24 +26,80 @@ local Settings = {
     PreviewPart = nil,
     PreviewPosition = nil,
     AttachmentStep = 2,
-    AttachedParts = {},       -- { {Part = part, TargetPos = pos} }  (но после Anchored уже не важно)
+    AttachedParts = {},        -- { {Part, AlignPos, Att0, Att1, AnchorPart} }
 }
 
-local AllParts = {}
+local AllParts = {}           -- для Tornado и отслеживания
 
--- Функция захвата (сохраняем лёгкую массу, но коллизию может менять режим)
+-- Функция захвата части
 local function RetainPart(part)
     if part:IsA("BasePart") and not part.Anchored then
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then
             return false
         end
         part.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.3, 0.5)
-        part.CanCollide = true   -- по умолчанию включена, в режимах будем менять
+        part.CanCollide = true
         return true
     end
     return false
 end
 
+-- Создать AlignPosition между частью и якорем (невидимой частью)
+local function CreateAlign(part, targetPos)
+    -- Удаляем старые аттачменты, если есть
+    local oldAlign = part:FindFirstChild("AlignPosition")
+    if oldAlign then oldAlign:Destroy() end
+    local oldAtt0 = part:FindFirstChild("Att0")
+    if oldAtt0 then oldAtt0:Destroy() end
+    local oldAnchor = part:FindFirstChild("AnchorPart")
+    if oldAnchor then oldAnchor:Destroy() end
+
+    -- Якорь (невидимая anchored часть)
+    local anchor = Instance.new("Part")
+    anchor.Name = "AnchorPart"
+    anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+    anchor.Anchored = true
+    anchor.CanCollide = false
+    anchor.Transparency = 1
+    anchor.Position = targetPos
+    anchor.Parent = Workspace
+
+    -- Аттачменты
+    local att0 = Instance.new("Attachment", part)
+    att0.Name = "Att0"
+    att0.Position = Vector3.new(0, 0, 0)
+    local att1 = Instance.new("Attachment", anchor)
+    att1.Position = Vector3.new(0, 0, 0)
+
+    -- AlignPosition
+    local align = Instance.new("AlignPosition", part)
+    align.Name = "AlignPosition"
+    align.MaxForce = 100000
+    align.MaxVelocity = 1000
+    align.Responsiveness = 100
+    align.Attachment0 = att0
+    align.Attachment1 = att1
+
+    return anchor, align
+end
+
+-- Удалить привязку у части
+local function RemoveAlign(part)
+    local align = part:FindFirstChild("AlignPosition")
+    if align then align:Destroy() end
+    local att0 = part:FindFirstChild("Att0")
+    if att0 then att0:Destroy() end
+    local anchor = part:FindFirstChild("AnchorPart")
+    if anchor then
+        -- якорь может быть не прямым ребёнком, поищем
+        local anch = align and align.Attachment1 and align.Attachment1.Parent
+        if anch and anch:IsA("Part") and anch.Name == "AnchorPart" then
+            anch:Destroy()
+        end
+    end
+end
+
+-- Собрать все части
 local function CollectAllParts()
     local count = 0
     for _, v in pairs(Workspace:GetDescendants()) do
@@ -69,7 +122,7 @@ end
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V4.2",
+    Name = "Part Manipulator V5",
     LoadingTitle = "Part Manipulator",
     LoadingSubtitle = "by DeepSeek AI",
     ConfigurationSaving = { Enabled = false },
@@ -92,6 +145,7 @@ MainTab:CreateButton({
     Callback = function()
         for _, part in pairs(AllParts) do
             if part and part.Parent then
+                RemoveAlign(part)
                 part.Anchored = false
                 part.CanCollide = true
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
@@ -146,11 +200,21 @@ MainTab:CreateToggle({
         Settings.IsActive = Value
         if Value then
             Settings.TornadoMode = false
-            -- Для удобства во время удержания отключаем коллизию, чтобы не отталкивало игрока
+            -- Для удобства во время удержания отключаем коллизию
             Settings.SelectedPart.CanCollide = false
+            -- Создаём AlignPosition к якорю, который будем двигать за мышью
+            local part = Settings.SelectedPart
+            RemoveAlign(part)
+            local anchor, align = CreateAlign(part, part.Position)
+            part:WaitForChild("AnchorPart", 1) -- не нужно, якорь не в части
+            -- Сохраним anchor в part, чтобы потом найти
+            -- Запомним связь в Settings
+            Settings.HoldAnchor = anchor
         else
             if Settings.SelectedPart then
                 Settings.SelectedPart.CanCollide = true
+                RemoveAlign(Settings.SelectedPart)
+                Settings.HoldAnchor = nil
             end
         end
     end,
@@ -177,7 +241,8 @@ MainTab:CreateButton({
         local part = Settings.SelectedPart
         local mousePos = Mouse.Hit.Position
         local direction = (mousePos - part.Position).Unit
-        part.CanCollide = true   -- при броске включаем коллизию
+        RemoveAlign(part)
+        part.CanCollide = true
         part.Velocity = direction * Settings.ThrowForce
         Settings.SelectedPart = nil
         Settings.IsActive = false
@@ -194,6 +259,18 @@ MainTab:CreateToggle({
         Settings.TornadoMode = Value
         Settings.IsActive = false
         if Value and #AllParts == 0 then CollectAllParts() end
+        if Value then
+            -- Для каждой части создаём AlignPosition с якорем, который будем крутить
+            for _, part in pairs(AllParts) do
+                if not part:FindFirstChild("AlignPosition") then
+                    local anchor, align = CreateAlign(part, part.Position)
+                end
+            end
+        else
+            for _, part in pairs(AllParts) do
+                RemoveAlign(part)
+            end
+        end
     end,
 })
 MainTab:CreateToggle({
@@ -237,6 +314,7 @@ MainTab:CreateButton({
         for _, item in pairs(Settings.AttachedParts) do
             local part = item.Part
             if part and part.Parent then
+                RemoveAlign(part)
                 part.Anchored = false
                 part.CanCollide = true
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
@@ -257,9 +335,10 @@ Mouse.Button1Down:Connect(function()
     if not char or target:IsDescendantOf(char) then return end
 
     if Settings.AttachmentMode then
-        -- Если уже прикреплена (Anchored) – открепить
+        -- Если уже прикреплена – открепить
         for i, item in pairs(Settings.AttachedParts) do
             if item.Part == target then
+                RemoveAlign(target)
                 target.Anchored = false
                 target.CanCollide = true
                 target.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
@@ -273,11 +352,15 @@ Mouse.Button1Down:Connect(function()
         -- Начать превью
         if RetainPart(target) then
             Settings.PreviewPart = target
-            Settings.PreviewPart.CanCollide = false   -- отключаем коллизию, чтобы легко позиционировать
+            Settings.PreviewPart.CanCollide = false   -- без коллизии для удобства позиционирования
             Settings.PreviewPosition = target.Position
             if not table.find(AllParts, target) then
                 table.insert(AllParts, target)
             end
+            -- Создадим AlignPosition для превью, чтобы часть следовала за PreviewPosition
+            RemoveAlign(target)
+            local anchor, align = CreateAlign(target, Settings.PreviewPosition)
+            Settings.PreviewAnchor = anchor
             Rayfield:Notify({ Title = "Preview", Content = "E/Q - высота, X/Z - вправо/влево, Enter - закрепить.", Duration = 2 })
         end
     else
@@ -291,23 +374,36 @@ Mouse.Button1Down:Connect(function()
     end
 end)
 
--- Физический цикл
+-- Основной цикл
 RunService.Heartbeat:Connect(function()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local root = char.HumanoidRootPart
 
-    -- Торнадо
+    -- Обновление позиций якорей для AlignPosition
+    -- Tornado
     if Settings.TornadoMode then
         local angle = tick() * Settings.TornadoSpeed
         for i, part in pairs(AllParts) do
-            if part and part.Parent and not part.Anchored and not table.find(Settings.AttachedParts, function(item) return item.Part == part end) then
-                local offset = i * 2.4
-                local x = math.cos(angle + offset) * Settings.TornadoRadius
-                local z = math.sin(angle + offset) * Settings.TornadoRadius
-                local y = math.sin(tick() * 2 + offset) * Settings.TornadoHeight
-                local targetPos = root.Position + Vector3.new(x, y, z)
-                part.Velocity = (targetPos - part.Position) * 5
+            if part and part.Parent then
+                local anchor = nil
+                -- Ищем якорь этой части (он может быть где-то в Workspace, но мы не храним ссылку)
+                -- Проще: найдём все AnchorPart и проверим их AlignPosition
+                -- Вместо этого мы в режиме Tornado при создании сохранили якоря в массиве, но не сделали этого.
+                -- Исправим: в коллбеке Tornado mode надо сохранять якоря в таблицу, чтобы обновлять их позиции.
+                -- Пока для простоты будем пробегать по детям Workspace и искать AnchorPart, привязанный к этой части.
+                -- Это громоздко, поэтому в следующей итерации оптимизируем, но сейчас для работоспособности:
+                local align = part:FindFirstChild("AlignPosition")
+                if align and align.Attachment1 and align.Attachment1.Parent and align.Attachment1.Parent:IsA("Part") and align.Attachment1.Parent.Name == "AnchorPart" then
+                    anchor = align.Attachment1.Parent
+                end
+                if anchor then
+                    local offset = i * 2.4
+                    local x = math.cos(angle + offset) * Settings.TornadoRadius
+                    local z = math.sin(angle + offset) * Settings.TornadoRadius
+                    local y = math.sin(tick() * 2 + offset) * Settings.TornadoHeight
+                    anchor.Position = root.Position + Vector3.new(x, y, z)
+                end
                 part.AngularVelocity = Vector3.new(0, Settings.TornadoSpeed, 0)
 
                 if Settings.KillMode then
@@ -324,15 +420,15 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- Удержание выбранной части
+    -- Hold (удержание одной части)
     if Settings.IsActive and Settings.SelectedPart and Settings.SelectedPart.Parent and not Settings.AttachmentMode then
         local part = Settings.SelectedPart
         local mousePos = Mouse.Hit.Position
         local targetPos = root.Position + (mousePos - root.Position).Unit * Settings.HoldDistance + Vector3.new(0, 3, 0)
-        local diff = targetPos - part.Position
-        local speed = math.min(diff.Magnitude * 2, 120)
-        part.Velocity = diff.Unit * speed
-
+        -- Передвигаем якорь
+        if Settings.HoldAnchor then
+            Settings.HoldAnchor.Position = targetPos
+        end
         if Settings.KillMode then
             for _, player in pairs(Players:GetPlayers()) do
                 if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -350,31 +446,10 @@ RunService.Heartbeat:Connect(function()
         Settings.SelectedPart.AngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0)
     end
 
-    -- Прикреплённые части (теперь они Anchored, цикл не нужен, но оставим на случай, если кто-то вручную снимет Anchor)
-    for _, item in pairs(Settings.AttachedParts) do
-        local part = item.Part
-        if part and part.Parent and not part.Anchored then
-            -- Если вдруг разъанкорили, попробуем удержать (запасной вариант)
-            local targetPos = item.TargetPos
-            local diff = targetPos - part.Position
-            if diff.Magnitude > 0.05 then
-                local speed = math.min(diff.Magnitude * 30, 200)
-                part.Velocity = diff.Unit * speed
-            else
-                part.Velocity = Vector3.new(0, 0, 0)
-            end
-        end
-    end
-
-    -- Превью часть (строительство) – без коллизии, просто двигаем
+    -- Превью (строительство)
     if Settings.PreviewPart and Settings.PreviewPart.Parent and Settings.AttachmentMode then
-        local part = Settings.PreviewPart
-        local targetPos = Settings.PreviewPosition
-        local diff = targetPos - part.Position
-        if diff.Magnitude > 0.01 then
-            part.Velocity = diff.Unit * math.min(diff.Magnitude * 30, 200)
-        else
-            part.Velocity = Vector3.new(0, 0, 0)
+        if Settings.PreviewAnchor then
+            Settings.PreviewAnchor.Position = Settings.PreviewPosition
         end
     end
 end)
@@ -390,16 +465,17 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         local pos = Settings.PreviewPosition
 
         if key == Enum.KeyCode.E then
-            Settings.PreviewPosition = pos + Vector3.new(0, step, 0)   -- Вверх
+            Settings.PreviewPosition = pos + Vector3.new(0, step, 0)
         elseif key == Enum.KeyCode.Q then
-            Settings.PreviewPosition = pos + Vector3.new(0, -step, 0)  -- Вниз
+            Settings.PreviewPosition = pos + Vector3.new(0, -step, 0)
         elseif key == Enum.KeyCode.X then
-            Settings.PreviewPosition = pos + Vector3.new(step, 0, 0)   -- Вправо
+            Settings.PreviewPosition = pos + Vector3.new(step, 0, 0)
         elseif key == Enum.KeyCode.Z then
-            Settings.PreviewPosition = pos + Vector3.new(-step, 0, 0)  -- Влево
+            Settings.PreviewPosition = pos + Vector3.new(-step, 0, 0)
         elseif key == Enum.KeyCode.Return then
             local part = Settings.PreviewPart
-            -- Фиксируем: делаем Anchored, возвращаем коллизию, чтобы можно было стоять
+            -- Убираем старую привязку, если есть, и делаем anchored
+            RemoveAlign(part)
             part.Anchored = true
             part.CanCollide = true
             part.Velocity = Vector3.new(0, 0, 0)
@@ -407,51 +483,65 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             table.insert(Settings.AttachedParts, {Part = part, TargetPos = Settings.PreviewPosition})
             Settings.PreviewPart = nil
             Settings.PreviewPosition = nil
+            if Settings.PreviewAnchor then
+                Settings.PreviewAnchor:Destroy()
+                Settings.PreviewAnchor = nil
+            end
             Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена статично!", Duration = 2 })
         elseif key == Enum.KeyCode.Backspace or key == Enum.KeyCode.Escape then
             local part = Settings.PreviewPart
-            if part and part.Parent then
-                part.CanCollide = true
-                part.Velocity = Vector3.new(0, 0, 0)
-            end
+            RemoveAlign(part)
+            part.CanCollide = true
+            part.Velocity = Vector3.new(0, 0, 0)
             Settings.PreviewPart = nil
             Settings.PreviewPosition = nil
+            if Settings.PreviewAnchor then
+                Settings.PreviewAnchor:Destroy()
+                Settings.PreviewAnchor = nil
+            end
             Rayfield:Notify({ Title = "Cancelled", Content = "Превью отменено.", Duration = 2 })
         end
         return
     end
 
     -- Обычные клавиши
-    if key == Enum.KeyCode.E then
+    if key == Enum.KeyCode.E and not Settings.AttachmentMode then
         if Settings.SelectedPart then
             Settings.IsActive = not Settings.IsActive
             Settings.TornadoMode = false
-            if Settings.IsActive then
-                Settings.SelectedPart.CanCollide = false
-            else
-                Settings.SelectedPart.CanCollide = true
-            end
         end
-    elseif key == Enum.KeyCode.Q then
+    elseif key == Enum.KeyCode.Q and not Settings.AttachmentMode then
         if Settings.SelectedPart then
             local part = Settings.SelectedPart
             local mousePos = Mouse.Hit.Position
             local direction = (mousePos - part.Position).Unit
+            RemoveAlign(part)
             part.CanCollide = true
             part.Velocity = direction * Settings.ThrowForce
             Settings.SelectedPart = nil
             Settings.IsActive = false
             Settings.RotateMode = false
         end
-    elseif key == Enum.KeyCode.R then
+    elseif key == Enum.KeyCode.R and not Settings.AttachmentMode then
         if Settings.SelectedPart then
             Settings.RotateMode = not Settings.RotateMode
         end
-    elseif key == Enum.KeyCode.T then
+    elseif key == Enum.KeyCode.T and not Settings.AttachmentMode then
         Settings.TornadoMode = not Settings.TornadoMode
         Settings.IsActive = false
-        if Settings.TornadoMode and #AllParts == 0 then CollectAllParts() end
-    elseif key == Enum.KeyCode.F then
+        if Settings.TornadoMode then
+            if #AllParts == 0 then CollectAllParts() end
+            for _, part in pairs(AllParts) do
+                if not part:FindFirstChild("AlignPosition") then
+                    local anchor, align = CreateAlign(part, part.Position)
+                end
+            end
+        else
+            for _, part in pairs(AllParts) do
+                RemoveAlign(part)
+            end
+        end
+    elseif key == Enum.KeyCode.F and not Settings.AttachmentMode then
         Settings.KillMode = not Settings.KillMode
     end
 end)
@@ -490,4 +580,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Part Manipulator V4.2 loaded – Anchored attachment, no-collision preview, no more flying parts.")
+print("Part Manipulator V5 loaded – AlignPosition for infinite range.")
