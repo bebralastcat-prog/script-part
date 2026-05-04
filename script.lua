@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V6.4 (Building + Fling Combo)
+-- Ultimate Part Manipulator V6.5.1 (Master Toggle)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -12,6 +12,7 @@ sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
 
 -- Настройки
 local Settings = {
+    MasterEnabled = true,   -- ГЛАВНЫЙ ВЫКЛЮЧАТЕЛЬ
     SelectedPart = nil,
     IsActive = false,
     HoldDistance = 10,
@@ -35,6 +36,7 @@ local Settings = {
     HighlightAll = false,
     HighlightColor = Color3.fromRGB(0, 255, 100),
     BuildingFling = false,
+    SelectionEnabled = true,
 }
 
 local AllParts = {}
@@ -108,11 +110,43 @@ local function UpdateHighlightAll()
     end
 end
 
+-- Функция полного сброса (используется при выключении Master)
+local function FullDrop()
+    for _, part in pairs(AllParts) do
+        if part and part.Parent then
+            part.Anchored = false
+            part.CanCollide = true
+            part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
+            part.Velocity = Vector3.new(0, 0, 0)
+            part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end
+    end
+    for _, item in pairs(Settings.AttachedParts) do
+        local part = item.Part
+        if part and part.Parent then
+            part.Anchored = false
+            part.CanCollide = true
+            part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
+            part.Velocity = Vector3.new(0, 0, 0)
+            part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end
+    end
+    AllParts = {}
+    Settings.AttachedParts = {}
+    Settings.SelectedPart = nil
+    Settings.IsActive = false
+    Settings.TornadoMode = false
+    Settings.KillMode = false
+    Settings.RotateMode = false
+    Settings.PreviewPart = nil
+    Settings.BuildingFling = false
+end
+
 -- === RAYFIELD UI ===
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V6.4",
+    Name = "Part Manipulator V6.5.1",
     LoadingTitle = "Part Manipulator",
     LoadingSubtitle = "by DeepSeek AI",
     ConfigurationSaving = { Enabled = false },
@@ -123,7 +157,24 @@ local MainTab = Window:CreateTab("Main", 4483362458)
 local VisualTab = Window:CreateTab("Visual", 4483362458)
 local ListTab = Window:CreateTab("Parts List", 4483362458)
 
--- ===== MAIN TAB =====
+-- ===== MASTER CONTROL (новая секция) =====
+local MasterSection = MainTab:CreateSection("Master Control")
+MainTab:CreateToggle({
+    Name = "🔴 MASTER TOGGLE (ON/OFF)",
+    CurrentValue = true,
+    Flag = "MasterEnabled",
+    Callback = function(Value)
+        Settings.MasterEnabled = Value
+        if not Value then
+            FullDrop()
+            Rayfield:Notify({ Title = "Master OFF", Content = "Скрипт отключён. Все части сброшены.", Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "Master ON", Content = "Скрипт включён. Можно работать.", Duration = 3 })
+        end
+    end,
+})
+
+-- ===== MAIN TAB (остальное) =====
 local CollectSection = MainTab:CreateSection("Collection")
 MainTab:CreateButton({
     Name = "Collect All Parts",
@@ -135,24 +186,7 @@ MainTab:CreateButton({
 MainTab:CreateButton({
     Name = "Drop All Parts",
     Callback = function()
-        for _, part in pairs(AllParts) do
-            if part and part.Parent then
-                part.Anchored = false
-                part.CanCollide = true
-                part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
-                part.Velocity = Vector3.new(0, 0, 0)
-                part.AngularVelocity = Vector3.new(0, 0, 0)
-                part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-            end
-        end
-        AllParts = {}
-        Settings.SelectedPart = nil
-        Settings.IsActive = false
-        Settings.TornadoMode = false
-        Settings.KillMode = false
-        Settings.RotateMode = false
-        Settings.AttachedParts = {}
-        Settings.PreviewPart = nil
+        FullDrop()
         Rayfield:Notify({ Title = "Dropped", Content = "Все части сброшены", Duration = 2, Image = 4483362458 })
     end,
 })
@@ -165,6 +199,14 @@ MainTab:CreateToggle({
     Callback = function(Value)
         Settings.UseNetworkOwner = Value
         if Value then NetworkOwnerFailed = false end
+    end,
+})
+MainTab:CreateToggle({
+    Name = "Selection Mode (Click to select)",
+    CurrentValue = true,
+    Flag = "SelectionEnabled",
+    Callback = function(Value)
+        Settings.SelectionEnabled = Value
     end,
 })
 MainTab:CreateSlider({
@@ -201,6 +243,7 @@ MainTab:CreateToggle({
     CurrentValue = false,
     Flag = "HoldPart",
     Callback = function(Value)
+        if not Settings.MasterEnabled then return end
         if not Settings.SelectedPart then
             Rayfield:Notify({ Title = "Error", Content = "Нет выбранной части", Duration = 2 })
             return
@@ -231,6 +274,7 @@ MainTab:CreateToggle({
     CurrentValue = false,
     Flag = "RotatePart",
     Callback = function(Value)
+        if not Settings.MasterEnabled then return end
         if not Settings.SelectedPart then
             Rayfield:Notify({ Title = "Error", Content = "Нет выбранной части", Duration = 2 })
             return
@@ -241,6 +285,7 @@ MainTab:CreateToggle({
 MainTab:CreateButton({
     Name = "Throw Part",
     Callback = function()
+        if not Settings.MasterEnabled then return end
         if not Settings.SelectedPart then
             Rayfield:Notify({ Title = "Error", Content = "Нет выбранной части", Duration = 2 })
             return
@@ -269,6 +314,7 @@ MainTab:CreateToggle({
     CurrentValue = false,
     Flag = "TornadoMode",
     Callback = function(Value)
+        if not Settings.MasterEnabled then return end
         Settings.TornadoMode = Value
         Settings.IsActive = false
         if Value and #AllParts == 0 then CollectAllParts() end
@@ -279,6 +325,7 @@ MainTab:CreateToggle({
     CurrentValue = false,
     Flag = "FlingMode",
     Callback = function(Value)
+        if not Settings.MasterEnabled then return end
         Settings.KillMode = Value
         if not Value then
             for _, part in pairs(AllParts) do
@@ -299,6 +346,7 @@ MainTab:CreateToggle({
     CurrentValue = false,
     Flag = "AttachmentMode",
     Callback = function(Value)
+        if not Settings.MasterEnabled then return end
         Settings.AttachmentMode = Value
         Settings.PreviewPart = nil
         Settings.PreviewPosition = nil
@@ -326,6 +374,7 @@ MainTab:CreateToggle({
     CurrentValue = false,
     Flag = "BuildingFling",
     Callback = function(Value)
+        if not Settings.MasterEnabled then return end
         Settings.BuildingFling = Value
         if Value then
             for _, item in pairs(Settings.AttachedParts) do
@@ -360,7 +409,6 @@ MainTab:CreateButton({
                 part.CanCollide = true
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 part.Velocity = Vector3.new(0, 0, 0)
-                part.AngularVelocity = Vector3.new(0, 0, 0)
                 part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             end
         end
@@ -453,6 +501,9 @@ ListTab:CreateButton({
 
 -- ===== ЛОГИКА ВЫБОРА ЧАСТИ =====
 Mouse.Button1Down:Connect(function()
+    if not Settings.MasterEnabled then return end
+    if not Settings.SelectionEnabled then return end
+
     local target = Mouse.Target
     if not (target and target:IsA("BasePart") and not target.Anchored) then return end
     local char = LocalPlayer.Character
@@ -494,6 +545,7 @@ end)
 
 -- ===== ГЛАВНЫЙ ФИЗИЧЕСКИЙ ЦИКЛ =====
 RunService.Heartbeat:Connect(function()
+    if not Settings.MasterEnabled then return end
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local root = char.HumanoidRootPart
@@ -517,7 +569,7 @@ RunService.Heartbeat:Connect(function()
                         math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed)
                     )
                 else
-                    part.AngularVelocity = Vector3.new(0, Settings.TornadoSpeed, 0)
+                    part.AssemblyAngularVelocity = Vector3.new(0, Settings.TornadoSpeed, 0)
                 end
             end
         end
@@ -542,7 +594,7 @@ RunService.Heartbeat:Connect(function()
     -- Вращение
     if Settings.RotateMode and Settings.SelectedPart and Settings.SelectedPart.Parent and not Settings.AttachmentMode then
         if not Settings.KillMode then
-            Settings.SelectedPart.AngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0)
+            Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0)
         end
     end
 
@@ -580,6 +632,7 @@ end)
 -- ===== КЛАВИАТУРА =====
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
+    if not Settings.MasterEnabled then return end
 
     local key = input.KeyCode
 
@@ -600,7 +653,6 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             part.Anchored = true
             part.CanCollide = true
             part.Velocity = Vector3.new(0, 0, 0)
-            part.AngularVelocity = Vector3.new(0, 0, 0)
             part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             table.insert(Settings.AttachedParts, {
                 Part = part,
@@ -709,4 +761,4 @@ end)
 
 RefreshPartsList()
 
-print("Part Manipulator V6.4 loaded - Building Fling Combo! Attach + Spin = Trap!")
+print("Part Manipulator V6.5.1 loaded - Master Toggle ready!")
