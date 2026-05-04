@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V6.5.1 (Master Toggle)
+-- Ultimate Part Manipulator V6.5.2 (NetworkOwner Default + All Fixes)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -12,7 +12,7 @@ sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
 
 -- Настройки
 local Settings = {
-    MasterEnabled = true,   -- ГЛАВНЫЙ ВЫКЛЮЧАТЕЛЬ
+    MasterEnabled = true,
     SelectedPart = nil,
     IsActive = false,
     HoldDistance = 10,
@@ -32,7 +32,7 @@ local Settings = {
     AttachmentStep = 2,
     AttachedParts = {},
 
-    UseNetworkOwner = false,
+    UseNetworkOwner = true,   -- ВКЛЮЧЕНО по умолчанию
     HighlightAll = false,
     HighlightColor = Color3.fromRGB(0, 255, 100),
     BuildingFling = false,
@@ -41,6 +41,7 @@ local Settings = {
 
 local AllParts = {}
 local NetworkOwnerFailed = false
+local NetworkOwnerTested = false  -- Флаг для одноразового уведомления
 local HighlightFolder = nil
 
 local function RetainPart(part)
@@ -48,12 +49,26 @@ local function RetainPart(part)
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then
             return false
         end
+
+        -- Пробуем SetNetworkOwner только если включено и ещё не было ошибки
         if Settings.UseNetworkOwner and not NetworkOwnerFailed then
             local success, err = pcall(function()
                 part:SetNetworkOwner(LocalPlayer)
             end)
-            if not success then NetworkOwnerFailed = true end
+            if not success then
+                if not NetworkOwnerTested then
+                    NetworkOwnerFailed = true
+                    NetworkOwnerTested = true
+                    warn("⚠️ SetNetworkOwner запрещён сервером. Работаем в Legacy-режиме.")
+                end
+            else
+                if not NetworkOwnerTested then
+                    NetworkOwnerTested = true
+                    print("✅ NetworkOwner работает! Полный контроль над частями.")
+                end
+            end
         end
+
         part.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.3, 0.5)
         part.CanCollide = true
         return true
@@ -110,8 +125,9 @@ local function UpdateHighlightAll()
     end
 end
 
--- Функция полного сброса (используется при выключении Master)
+-- Полный сброс ВСЕХ частей
 local function FullDrop()
+    -- Сбрасываем все части из AllParts
     for _, part in pairs(AllParts) do
         if part and part.Parent then
             part.Anchored = false
@@ -121,6 +137,7 @@ local function FullDrop()
             part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
     end
+    -- Сбрасываем все прикреплённые части
     for _, item in pairs(Settings.AttachedParts) do
         local part = item.Part
         if part and part.Parent then
@@ -131,6 +148,7 @@ local function FullDrop()
             part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
     end
+    -- Очищаем все списки
     AllParts = {}
     Settings.AttachedParts = {}
     Settings.SelectedPart = nil
@@ -146,7 +164,7 @@ end
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V6.5.1",
+    Name = "Part Manipulator V6.5.2",
     LoadingTitle = "Part Manipulator",
     LoadingSubtitle = "by DeepSeek AI",
     ConfigurationSaving = { Enabled = false },
@@ -157,7 +175,7 @@ local MainTab = Window:CreateTab("Main", 4483362458)
 local VisualTab = Window:CreateTab("Visual", 4483362458)
 local ListTab = Window:CreateTab("Parts List", 4483362458)
 
--- ===== MASTER CONTROL (новая секция) =====
+-- ===== MASTER CONTROL =====
 local MasterSection = MainTab:CreateSection("Master Control")
 MainTab:CreateToggle({
     Name = "🔴 MASTER TOGGLE (ON/OFF)",
@@ -174,7 +192,14 @@ MainTab:CreateToggle({
     end,
 })
 
--- ===== MAIN TAB (остальное) =====
+-- Уведомление о статусе NetworkOwner
+if NetworkOwnerFailed then
+    Rayfield:Notify({ Title = "⚠️ Legacy Mode", Content = "SetNetworkOwner не работает. Используется обычный режим.", Duration = 5 })
+else
+    Rayfield:Notify({ Title = "✅ Network Owner", Content = "Полный контроль над частями активен!", Duration = 3 })
+end
+
+-- ===== MAIN TAB =====
 local CollectSection = MainTab:CreateSection("Collection")
 MainTab:CreateButton({
     Name = "Collect All Parts",
@@ -194,7 +219,7 @@ MainTab:CreateButton({
 local SettingsSection = MainTab:CreateSection("Settings")
 MainTab:CreateToggle({
     Name = "Use Network Ownership",
-    CurrentValue = false,
+    CurrentValue = true,  -- Включено по умолчанию
     Flag = "UseNetworkOwner",
     Callback = function(Value)
         Settings.UseNetworkOwner = Value
@@ -251,7 +276,7 @@ MainTab:CreateToggle({
         Settings.IsActive = Value
         if Value then
             Settings.TornadoMode = false
-            Settings.SelectedPart.CanCollide = false
+            Settings.SelectedPart.CanCollide = false  -- Коллизия OFF при удержании
             if Settings.KillMode then
                 Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(
                     math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
@@ -261,7 +286,7 @@ MainTab:CreateToggle({
             end
         else
             if Settings.SelectedPart then
-                Settings.SelectedPart.CanCollide = true
+                Settings.SelectedPart.CanCollide = true  -- Коллизия ON при отпускании
                 if not Settings.KillMode then
                     Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                 end
@@ -318,6 +343,20 @@ MainTab:CreateToggle({
         Settings.TornadoMode = Value
         Settings.IsActive = false
         if Value and #AllParts == 0 then CollectAllParts() end
+        -- Отключаем коллизию для ВСЕХ частей при Tornado
+        if Value then
+            for _, part in pairs(AllParts) do
+                if part and part.Parent then
+                    part.CanCollide = false
+                end
+            end
+        else
+            for _, part in pairs(AllParts) do
+                if part and part.Parent then
+                    part.CanCollide = true
+                end
+            end
+        end
     end,
 })
 MainTab:CreateToggle({
@@ -353,7 +392,7 @@ MainTab:CreateToggle({
         if Value then
             Rayfield:Notify({
                 Title = "Attachment",
-                Content = "Клик по части, E/Q/X/Z движение, Enter закрепить, R+Fling = флинг-ловушка!",
+                Content = "Клик по части, E/Q/X/Z движение, Enter закрепить.",
                 Duration = 5
             })
         end
@@ -550,7 +589,7 @@ RunService.Heartbeat:Connect(function()
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local root = char.HumanoidRootPart
 
-    -- Торнадо
+    -- Торнадо (коллизия отключена в коллбэке)
     if Settings.TornadoMode then
         local angle = tick() * Settings.TornadoSpeed
         for i, part in pairs(AllParts) do
@@ -575,7 +614,7 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- Удержание
+    -- Удержание (коллизия отключена в коллбэке)
     if Settings.IsActive and Settings.SelectedPart and Settings.SelectedPart.Parent and not Settings.AttachmentMode then
         local part = Settings.SelectedPart
         local mousePos = Mouse.Hit.Position
@@ -662,7 +701,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             })
             Settings.PreviewPart = nil
             Settings.PreviewPosition = nil
-            Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена! Включите Building Fling для ловушки.", Duration = 3 })
+            Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена!", Duration = 3 })
         elseif key == Enum.KeyCode.Backspace or key == Enum.KeyCode.Escape then
             local part = Settings.PreviewPart
             if part and part.Parent then
@@ -708,6 +747,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         Settings.TornadoMode = not Settings.TornadoMode
         Settings.IsActive = false
         if Settings.TornadoMode and #AllParts == 0 then CollectAllParts() end
+        -- Управление коллизией
+        if Settings.TornadoMode then
+            for _, part in pairs(AllParts) do
+                if part and part.Parent then part.CanCollide = false end
+            end
+        else
+            for _, part in pairs(AllParts) do
+                if part and part.Parent then part.CanCollide = true end
+            end
+        end
     elseif key == Enum.KeyCode.F and not Settings.AttachmentMode then
         Settings.KillMode = not Settings.KillMode
         if not Settings.KillMode then
@@ -761,4 +810,4 @@ end)
 
 RefreshPartsList()
 
-print("Part Manipulator V6.5.1 loaded - Master Toggle ready!")
+print("Part Manipulator V6.5.2 loaded - NetworkOwner Default + All Fixes!")
