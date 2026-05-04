@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V6 (Velocity + SetNetworkOwner)
+-- Ultimate Part Manipulator V6.4 (Building + Fling Combo)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -15,7 +15,6 @@ local Settings = {
     SelectedPart = nil,
     IsActive = false,
     HoldDistance = 10,
-    MoveSpeed = 5,
     ThrowForce = 500,
     RotateSpeed = 8,
     TornadoSpeed = 8,
@@ -24,24 +23,35 @@ local Settings = {
     RotateMode = false,
     TornadoMode = false,
     KillMode = false,
+    FlingSpinSpeed = 500,
 
     AttachmentMode = false,
     PreviewPart = nil,
     PreviewPosition = nil,
     AttachmentStep = 2,
-    AttachedParts = {},   -- {Part = part}
+    AttachedParts = {},
+
+    UseNetworkOwner = false,
+    HighlightAll = false,
+    HighlightColor = Color3.fromRGB(0, 255, 100),
+    BuildingFling = false,
 }
 
 local AllParts = {}
+local NetworkOwnerFailed = false
+local HighlightFolder = nil
 
--- Функция захвата и становления сетевым владельцем
 local function RetainPart(part)
     if part:IsA("BasePart") and not part.Anchored then
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then
             return false
         end
-        -- Делаем клиента владельцем сети, чтобы изменения Velocity реплицировались всем
-        part:SetNetworkOwner(LocalPlayer)
+        if Settings.UseNetworkOwner and not NetworkOwnerFailed then
+            local success, err = pcall(function()
+                part:SetNetworkOwner(LocalPlayer)
+            end)
+            if not success then NetworkOwnerFailed = true end
+        end
         part.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.3, 0.5)
         part.CanCollide = true
         return true
@@ -67,11 +77,42 @@ local function CollectAllParts()
     return count
 end
 
+local function GetUnanchoredPartsList()
+    local list = {}
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") and not v.Anchored then
+            local char = LocalPlayer.Character
+            if char and not v:IsDescendantOf(char) then
+                table.insert(list, v)
+            end
+        end
+    end
+    return list
+end
+
+local function UpdateHighlightAll()
+    if HighlightFolder then HighlightFolder:Destroy(); HighlightFolder = nil end
+    if Settings.HighlightAll then
+        HighlightFolder = Instance.new("Folder")
+        HighlightFolder.Name = "HighlightFolder"
+        HighlightFolder.Parent = Workspace
+        for _, part in pairs(GetUnanchoredPartsList()) do
+            local h = Instance.new("Highlight")
+            h.FillColor = Settings.HighlightColor
+            h.FillTransparency = 0.7
+            h.OutlineColor = Settings.HighlightColor
+            h.OutlineTransparency = 0
+            h.Parent = HighlightFolder
+            h.Adornee = part
+        end
+    end
+end
+
 -- === RAYFIELD UI ===
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V6",
+    Name = "Part Manipulator V6.4",
     LoadingTitle = "Part Manipulator",
     LoadingSubtitle = "by DeepSeek AI",
     ConfigurationSaving = { Enabled = false },
@@ -79,7 +120,10 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("Main", 4483362458)
+local VisualTab = Window:CreateTab("Visual", 4483362458)
+local ListTab = Window:CreateTab("Parts List", 4483362458)
 
+-- ===== MAIN TAB =====
 local CollectSection = MainTab:CreateSection("Collection")
 MainTab:CreateButton({
     Name = "Collect All Parts",
@@ -95,10 +139,10 @@ MainTab:CreateButton({
             if part and part.Parent then
                 part.Anchored = false
                 part.CanCollide = true
-                part:SetNetworkOwner(nil)
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 part.Velocity = Vector3.new(0, 0, 0)
                 part.AngularVelocity = Vector3.new(0, 0, 0)
+                part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             end
         end
         AllParts = {}
@@ -114,6 +158,15 @@ MainTab:CreateButton({
 })
 
 local SettingsSection = MainTab:CreateSection("Settings")
+MainTab:CreateToggle({
+    Name = "Use Network Ownership",
+    CurrentValue = false,
+    Flag = "UseNetworkOwner",
+    Callback = function(Value)
+        Settings.UseNetworkOwner = Value
+        if Value then NetworkOwnerFailed = false end
+    end,
+})
 MainTab:CreateSlider({
     Name = "Throw Force",
     Range = {100, 5000},
@@ -132,6 +185,15 @@ MainTab:CreateSlider({
     Flag = "HoldDistance",
     Callback = function(Value) Settings.HoldDistance = Value end,
 })
+MainTab:CreateSlider({
+    Name = "Fling Spin Speed",
+    Range = {100, 2000},
+    Increment = 50,
+    Suffix = "rad/s",
+    CurrentValue = Settings.FlingSpinSpeed,
+    Flag = "FlingSpinSpeed",
+    Callback = function(Value) Settings.FlingSpinSpeed = Value end,
+})
 
 local ActionsSection = MainTab:CreateSection("Actions")
 MainTab:CreateToggle({
@@ -147,9 +209,19 @@ MainTab:CreateToggle({
         if Value then
             Settings.TornadoMode = false
             Settings.SelectedPart.CanCollide = false
+            if Settings.KillMode then
+                Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(
+                    math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                    math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                    math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed)
+                )
+            end
         else
             if Settings.SelectedPart then
                 Settings.SelectedPart.CanCollide = true
+                if not Settings.KillMode then
+                    Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                end
             end
         end
     end,
@@ -178,6 +250,13 @@ MainTab:CreateButton({
         local direction = (mousePos - part.Position).Unit
         part.CanCollide = true
         part.Velocity = direction * Settings.ThrowForce
+        if Settings.KillMode then
+            part.AssemblyAngularVelocity = Vector3.new(
+                math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed)
+            )
+        end
         Settings.SelectedPart = nil
         Settings.IsActive = false
         Settings.RotateMode = false
@@ -199,7 +278,19 @@ MainTab:CreateToggle({
     Name = "Fling Mode",
     CurrentValue = false,
     Flag = "FlingMode",
-    Callback = function(Value) Settings.KillMode = Value end,
+    Callback = function(Value)
+        Settings.KillMode = Value
+        if not Value then
+            for _, part in pairs(AllParts) do
+                if part and part.Parent then
+                    part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                end
+            end
+            if Settings.SelectedPart then
+                Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end,
 })
 
 local AttachSection = MainTab:CreateSection("Attachment Mode")
@@ -214,7 +305,7 @@ MainTab:CreateToggle({
         if Value then
             Rayfield:Notify({
                 Title = "Attachment",
-                Content = "Режим прикрепления ВКЛ. Кликните по части, затем E/Q/X/Z для движения, Enter для фиксации.",
+                Content = "Клик по части, E/Q/X/Z движение, Enter закрепить, R+Fling = флинг-ловушка!",
                 Duration = 5
             })
         end
@@ -229,6 +320,36 @@ MainTab:CreateSlider({
     Flag = "AttachStep",
     Callback = function(Value) Settings.AttachmentStep = Value end,
 })
+
+MainTab:CreateToggle({
+    Name = "Building Fling (Attached Parts Spin)",
+    CurrentValue = false,
+    Flag = "BuildingFling",
+    Callback = function(Value)
+        Settings.BuildingFling = Value
+        if Value then
+            for _, item in pairs(Settings.AttachedParts) do
+                local part = item.Part
+                if part and part.Parent then
+                    part.Anchored = false
+                    item.FlingEnabled = true
+                    item.SpinSpeed = Settings.FlingSpinSpeed
+                end
+            end
+        else
+            for _, item in pairs(Settings.AttachedParts) do
+                local part = item.Part
+                if part and part.Parent then
+                    part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                    part.Anchored = true
+                    part.Velocity = Vector3.new(0, 0, 0)
+                    item.FlingEnabled = false
+                end
+            end
+        end
+    end,
+})
+
 MainTab:CreateButton({
     Name = "Unattach All",
     Callback = function()
@@ -240,14 +361,97 @@ MainTab:CreateButton({
                 part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 part.Velocity = Vector3.new(0, 0, 0)
                 part.AngularVelocity = Vector3.new(0, 0, 0)
+                part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             end
         end
         Settings.AttachedParts = {}
+        Settings.BuildingFling = false
         Rayfield:Notify({ Title = "Unattached", Content = "Все прикреплённые части сброшены.", Duration = 2 })
     end,
 })
 
--- Выбор части
+-- ===== VISUAL TAB =====
+local HighlightSection = VisualTab:CreateSection("Highlight Unanchored Parts")
+VisualTab:CreateToggle({
+    Name = "Highlight All Unanchored",
+    CurrentValue = false,
+    Flag = "HighlightAll",
+    Callback = function(Value)
+        Settings.HighlightAll = Value
+        UpdateHighlightAll()
+    end,
+})
+VisualTab:CreateButton({
+    Name = "Refresh Highlights",
+    Callback = function()
+        UpdateHighlightAll()
+        Rayfield:Notify({ Title = "Refreshed", Content = "Подсветка обновлена", Duration = 2 })
+    end,
+})
+
+-- ===== PARTS LIST TAB =====
+local PartsListSection = ListTab:CreateSection("All Unanchored Parts")
+local partsListLabel = ListTab:CreateParagraph({ Title = "Count", Content = "Loading..." })
+
+local function RefreshPartsList()
+    local parts = GetUnanchoredPartsList()
+    local text = ""
+    for i, part in ipairs(parts) do
+        if i <= 50 then
+            local dist = "?"
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                dist = math.floor((char.HumanoidRootPart.Position - part.Position).Magnitude)
+            end
+            text = text .. string.format("[%d] %s | %d studs\n", i, part.Name, dist)
+        end
+    end
+    if #parts > 50 then
+        text = text .. "... и ещё " .. (#parts - 50) .. " частей"
+    end
+    partsListLabel:SetTitle("Count: " .. #parts)
+    partsListLabel:SetContent(text)
+end
+
+ListTab:CreateButton({
+    Name = "Refresh Parts List",
+    Callback = function()
+        RefreshPartsList()
+        Rayfield:Notify({ Title = "Refreshed", Content = "Список обновлён", Duration = 2 })
+    end,
+})
+
+local TeleportSection = ListTab:CreateSection("Teleport to Part")
+local TeleportInput = ListTab:CreateInput({
+    Name = "Part Name",
+    PlaceholderText = "Введите имя части",
+    RemoveTextAfterFocusLost = false,
+    Flag = "TeleportPartName",
+    Callback = function() end,
+})
+ListTab:CreateButton({
+    Name = "Teleport to Part",
+    Callback = function()
+        local name = TeleportInput.CurrentValue
+        if not name or name == "" then
+            Rayfield:Notify({ Title = "Error", Content = "Введите имя части", Duration = 2 })
+            return
+        end
+        for _, part in pairs(GetUnanchoredPartsList()) do
+            if part.Name:lower():find(name:lower()) then
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("HumanoidRootPart") then
+                    char.HumanoidRootPart.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+                    Rayfield:Notify({ Title = "Teleported", Content = "К части: " .. part.Name, Duration = 2 })
+                    return
+                end
+            end
+        end
+        Rayfield:Notify({ Title = "Not Found", Content = "Часть не найдена", Duration = 2 })
+    end,
+})
+
+-- ===== ЛОГИКА ВЫБОРА ЧАСТИ =====
 Mouse.Button1Down:Connect(function()
     local target = Mouse.Target
     if not (target and target:IsA("BasePart") and not target.Anchored) then return end
@@ -255,20 +459,19 @@ Mouse.Button1Down:Connect(function()
     if not char or target:IsDescendantOf(char) then return end
 
     if Settings.AttachmentMode then
-        -- Если уже прикреплена – открепить
         for i, item in pairs(Settings.AttachedParts) do
             if item.Part == target then
                 target.Anchored = false
                 target.CanCollide = true
                 target.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
                 target.Velocity = Vector3.new(0, 0, 0)
+                target.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                 table.remove(Settings.AttachedParts, i)
                 Rayfield:Notify({ Title = "Unattached", Content = "Часть откреплена.", Duration = 2 })
                 return
             end
         end
 
-        -- Начать превью
         if RetainPart(target) then
             Settings.PreviewPart = target
             target.CanCollide = false
@@ -289,7 +492,7 @@ Mouse.Button1Down:Connect(function()
     end
 end)
 
--- Главный физический цикл (Velocity, всё просто)
+-- ===== ГЛАВНЫЙ ФИЗИЧЕСКИЙ ЦИКЛ =====
 RunService.Heartbeat:Connect(function()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -306,44 +509,41 @@ RunService.Heartbeat:Connect(function()
                 local y = math.sin(tick() * 2 + offset) * Settings.TornadoHeight
                 local targetPos = root.Position + Vector3.new(x, y, z)
                 part.Velocity = (targetPos - part.Position) * 5
-                part.AngularVelocity = Vector3.new(0, Settings.TornadoSpeed, 0)
-
+                
                 if Settings.KillMode then
-                    for _, player in pairs(Players:GetPlayers()) do
-                        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                            local hrp = player.Character.HumanoidRootPart
-                            if (part.Position - hrp.Position).Magnitude < 5 then
-                                hrp.Velocity = (part.Position - hrp.Position).Unit * 500 + Vector3.new(0, 200, 0)
-                            end
-                        end
-                    end
+                    part.AssemblyAngularVelocity = Vector3.new(
+                        math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                        math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                        math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed)
+                    )
+                else
+                    part.AngularVelocity = Vector3.new(0, Settings.TornadoSpeed, 0)
                 end
             end
         end
     end
 
-    -- Удержание (Hold)
+    -- Удержание
     if Settings.IsActive and Settings.SelectedPart and Settings.SelectedPart.Parent and not Settings.AttachmentMode then
         local part = Settings.SelectedPart
         local mousePos = Mouse.Hit.Position
         local targetPos = root.Position + (mousePos - root.Position).Unit * Settings.HoldDistance + Vector3.new(0, 3, 0)
-        part.Velocity = (targetPos - part.Position) * 10  -- усилим для отзывчивости
+        part.Velocity = (targetPos - part.Position) * 10
 
         if Settings.KillMode then
-            for _, player in pairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                    local hrp = player.Character.HumanoidRootPart
-                    if (part.Position - hrp.Position).Magnitude < 4 then
-                        hrp.Velocity = (part.Position - hrp.Position).Unit * 600 + Vector3.new(0, 250, 0)
-                    end
-                end
-            end
+            part.AssemblyAngularVelocity = Vector3.new(
+                math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed)
+            )
         end
     end
 
     -- Вращение
     if Settings.RotateMode and Settings.SelectedPart and Settings.SelectedPart.Parent and not Settings.AttachmentMode then
-        Settings.SelectedPart.AngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0)
+        if not Settings.KillMode then
+            Settings.SelectedPart.AngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0)
+        end
     end
 
     -- Превью (строительство)
@@ -351,9 +551,33 @@ RunService.Heartbeat:Connect(function()
         local part = Settings.PreviewPart
         part.Velocity = (Settings.PreviewPosition - part.Position) * 15
     end
+
+    -- Прикреплённые части с флингом
+    for _, item in pairs(Settings.AttachedParts) do
+        local part = item.Part
+        if part and part.Parent then
+            if item.FlingEnabled and Settings.BuildingFling then
+                if part.Anchored then
+                    part.Anchored = false
+                end
+                local targetPos = item.TargetPos or part.Position
+                part.Velocity = (targetPos - part.Position) * 20
+                part.AssemblyAngularVelocity = Vector3.new(
+                    math.random(-item.SpinSpeed, item.SpinSpeed),
+                    math.random(-item.SpinSpeed, item.SpinSpeed),
+                    math.random(-item.SpinSpeed, item.SpinSpeed)
+                )
+                part.CanCollide = true
+            elseif not item.FlingEnabled and not part.Anchored then
+                part.Anchored = true
+                part.Velocity = Vector3.new(0, 0, 0)
+                part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
 end)
 
--- Клавиатура
+-- ===== КЛАВИАТУРА =====
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
 
@@ -377,10 +601,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             part.CanCollide = true
             part.Velocity = Vector3.new(0, 0, 0)
             part.AngularVelocity = Vector3.new(0, 0, 0)
-            table.insert(Settings.AttachedParts, {Part = part})
+            part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            table.insert(Settings.AttachedParts, {
+                Part = part,
+                TargetPos = Settings.PreviewPosition,
+                FlingEnabled = false,
+                SpinSpeed = Settings.FlingSpinSpeed
+            })
             Settings.PreviewPart = nil
             Settings.PreviewPosition = nil
-            Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена!", Duration = 2 })
+            Rayfield:Notify({ Title = "Attached", Content = "Часть закреплена! Включите Building Fling для ловушки.", Duration = 3 })
         elseif key == Enum.KeyCode.Backspace or key == Enum.KeyCode.Escape then
             local part = Settings.PreviewPart
             if part and part.Parent then
@@ -407,6 +637,13 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             local direction = (mousePos - part.Position).Unit
             part.CanCollide = true
             part.Velocity = direction * Settings.ThrowForce
+            if Settings.KillMode then
+                part.AssemblyAngularVelocity = Vector3.new(
+                    math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                    math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed),
+                    math.random(-Settings.FlingSpinSpeed, Settings.FlingSpinSpeed)
+                )
+            end
             Settings.SelectedPart = nil
             Settings.IsActive = false
             Settings.RotateMode = false
@@ -421,6 +658,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if Settings.TornadoMode and #AllParts == 0 then CollectAllParts() end
     elseif key == Enum.KeyCode.F and not Settings.AttachmentMode then
         Settings.KillMode = not Settings.KillMode
+        if not Settings.KillMode then
+            for _, part in pairs(AllParts) do
+                if part and part.Parent then
+                    part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                end
+            end
+            if Settings.SelectedPart then
+                Settings.SelectedPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end
+        end
     end
 end)
 
@@ -429,13 +676,15 @@ RunService.RenderStepped:Connect(function()
     for _, v in pairs(Workspace:GetDescendants()) do
         if v:IsA("Highlight") then
             local parent = v.Parent
-            if parent ~= Settings.SelectedPart and parent ~= Settings.PreviewPart then
-                local isAttached = false
-                for _, item in pairs(Settings.AttachedParts) do
-                    if item.Part == parent then isAttached = true break end
-                end
-                if not isAttached then
-                    v:Destroy()
+            if parent ~= HighlightFolder then
+                if parent ~= Settings.SelectedPart and parent ~= Settings.PreviewPart then
+                    local isAttached = false
+                    for _, item in pairs(Settings.AttachedParts) do
+                        if item.Part == parent then isAttached = true break end
+                    end
+                    if not isAttached then
+                        v:Destroy()
+                    end
                 end
             end
         end
@@ -458,4 +707,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Part Manipulator V6 loaded – Hold works, Attachment works, infinite range.")
+RefreshPartsList()
+
+print("Part Manipulator V6.4 loaded - Building Fling Combo! Attach + Spin = Trap!")
