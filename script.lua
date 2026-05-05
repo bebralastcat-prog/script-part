@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V6.8 (All Fixes + Stable Core)
+-- Ultimate Part Manipulator V6.8.1 EMERGENCY FIX
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -10,7 +10,7 @@ local Mouse = LocalPlayer:GetMouse()
 LocalPlayer.ReplicationFocus = Workspace
 sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
 
--- ========== НАСТРОЙКИ ==========
+-- Настройки
 local Settings = {
     MasterEnabled = true,
     SelectedParts = {},
@@ -36,12 +36,10 @@ local Settings = {
     HighlightAll = false,
     HighlightColor = Color3.fromRGB(0, 255, 100),
     BuildingFling = false,
-    SelectionEnabled = true,
-    MultiSelectKey = Enum.KeyCode.LeftControl,
 
+    MultiSelectKey = Enum.KeyCode.LeftControl,
     NetworkRefreshInterval = 1.0,
     ForceGrabEnabled = true,
-    ForceGrabDistance = 100,
 
     PlacedTornadoes = {},
     PlacedTornadoRadius = 30,
@@ -52,20 +50,22 @@ local Settings = {
 }
 
 local AllParts = {}
-local NetworkOwnerWorks = true  -- Флаг успешности NetworkOwner
+local NetworkOwnerFailed = false
 local HighlightFolder = nil
 local networkRefreshTimer = 0
 
--- ========== ФУНКЦИИ ==========
+-- Гарантированный захват части
 local function RetainPart(part)
     if part:IsA("BasePart") and not part.Anchored then
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then
             return false
         end
-        if Settings.UseNetworkOwner and NetworkOwnerWorks then
+        
+        if Settings.UseNetworkOwner and not NetworkOwnerFailed then
             local ok = pcall(function() part:SetNetworkOwner(LocalPlayer) end)
-            if not ok then NetworkOwnerWorks = false end
+            if not ok then NetworkOwnerFailed = true end
         end
+        
         part.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.3, 0.5)
         part.CanCollide = true
         return true
@@ -98,21 +98,24 @@ end
 local function UpdateHighlightAll()
     if HighlightFolder then HighlightFolder:Destroy(); HighlightFolder = nil end
     if Settings.HighlightAll then
-        HighlightFolder = Instance.new("Folder"); HighlightFolder.Name = "HighlightFolder"; HighlightFolder.Parent = Workspace
+        HighlightFolder = Instance.new("Folder"); HighlightFolder.Name = "HighlightFolder"
+        HighlightFolder.Parent = Workspace
         for _, part in pairs(GetUnanchoredPartsList()) do
-            local h = Instance.new("Highlight"); h.FillColor = Settings.HighlightColor; h.FillTransparency = 0.7
-            h.OutlineColor = Settings.HighlightColor; h.OutlineTransparency = 0; h.Adornee = part; h.Parent = HighlightFolder
+            local h = Instance.new("Highlight"); h.FillColor = Settings.HighlightColor
+            h.FillTransparency = 0.7; h.OutlineColor = Settings.HighlightColor
+            h.OutlineTransparency = 0; h.Adornee = part; h.Parent = HighlightFolder
         end
     end
 end
 
-local function CreateTornadoAnchor(position)
-    local anchor = Instance.new("Part"); anchor.Name = "TornadoAnchor"; anchor.Size = Vector3.new(0.5,0.5,0.5)
-    anchor.Anchored = true; anchor.CanCollide = false; anchor.Transparency = 0.7; anchor.Color = Color3.fromRGB(139,0,255)
-    anchor.Material = Enum.Material.Neon; anchor.Position = position; anchor.Parent = Workspace
-    local glow = Instance.new("PointLight"); glow.Color = Color3.fromRGB(139,0,255)
-    glow.Range = Settings.PlacedTornadoRadius; glow.Brightness = 1.5; glow.Parent = anchor
-    return anchor
+local function CreateTornadoAnchor(pos)
+    local a = Instance.new("Part"); a.Name = "Anchor"; a.Size = Vector3.new(0.5,0.5,0.5)
+    a.Anchored = true; a.CanCollide = false; a.Transparency = 0.7
+    a.Color = Color3.fromRGB(139,0,255); a.Material = Enum.Material.Neon
+    a.Position = pos; a.Parent = Workspace
+    local l = Instance.new("PointLight"); l.Color = Color3.fromRGB(139,0,255)
+    l.Range = Settings.PlacedTornadoRadius; l.Brightness = 1.5; l.Parent = a
+    return a
 end
 
 local function ClearAllTornadoes()
@@ -145,56 +148,48 @@ end
 -- ========== RAYFIELD UI ==========
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V6.8",
+    Name = "Part Manipulator V6.8.1 FIX",
     LoadingTitle = "Part Manipulator",
-    LoadingSubtitle = "by DeepSeek AI",
+    LoadingSubtitle = "Emergency Fix",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false
 })
 local MainTab = Window:CreateTab("Main", 4483362458)
 local TornadoTab = Window:CreateTab("Tornado", 4483362458)
 local VisualTab = Window:CreateTab("Visual", 4483362458)
-local ListTab = Window:CreateTab("Parts List", 4483362458)
 
--- MASTER CONTROL
+-- MASTER
 MainTab:CreateSection("Master Control")
-MainTab:CreateToggle({ Name = "🔴 MASTER TOGGLE", CurrentValue = true, Flag = "MasterEnabled", Callback = function(v) Settings.MasterEnabled = v; if not v then FullDrop() end end })
+MainTab:CreateToggle({ Name = "🔴 MASTER TOGGLE", CurrentValue = true, Callback = function(v) Settings.MasterEnabled = v; if not v then FullDrop() end end })
 
 -- SETTINGS
 MainTab:CreateSection("Settings")
-MainTab:CreateToggle({ Name = "Use Network Ownership", CurrentValue = true, Flag = "UseNetworkOwner", Callback = function(v) Settings.UseNetworkOwner = v; NetworkOwnerWorks = v end })
-MainTab:CreateToggle({ Name = "Selection Mode", CurrentValue = true, Flag = "SelectionEnabled", Callback = function(v) Settings.SelectionEnabled = v end })
-MainTab:CreateToggle({ Name = "Force Grab", CurrentValue = true, Flag = "ForceGrabEnabled", Callback = function(v) Settings.ForceGrabEnabled = v end })
-MainTab:CreateSlider({ Name = "Network Refresh", Range = {0.1, 5.0}, Increment = 0.1, Suffix = "sec", CurrentValue = Settings.NetworkRefreshInterval, Callback = function(v) Settings.NetworkRefreshInterval = v end })
+MainTab:CreateToggle({ Name = "Use Network Ownership", CurrentValue = true, Callback = function(v) Settings.UseNetworkOwner = v; NetworkOwnerFailed = false end })
 MainTab:CreateSlider({ Name = "Throw Force", Range = {100, 5000}, Increment = 100, Suffix = "Studs/s", CurrentValue = Settings.ThrowForce, Callback = function(v) Settings.ThrowForce = v end })
 MainTab:CreateSlider({ Name = "Hold Distance", Range = {3, 30}, Increment = 1, Suffix = "Studs", CurrentValue = Settings.HoldDistance, Callback = function(v) Settings.HoldDistance = v end })
 MainTab:CreateSlider({ Name = "Fling Spin Speed", Range = {100, 2000}, Increment = 50, Suffix = "rad/s", CurrentValue = Settings.FlingSpinSpeed, Callback = function(v) Settings.FlingSpinSpeed = v end })
 
 -- ACTIONS
 MainTab:CreateSection("Actions")
-MainTab:CreateButton({ Name = "Collect All Parts", Callback = function() Rayfield:Notify({ Title = "Collected", Content = "Собрано " .. CollectAllParts() .. " частей", Duration = 2 }) end })
-MainTab:CreateButton({ Name = "Drop All Parts", Callback = function() FullDrop(); Rayfield:Notify({ Title = "Dropped", Content = "Все сброшены", Duration = 2 }) end })
-MainTab:CreateToggle({ Name = "Hold Parts", CurrentValue = false, Callback = function(v) Settings.IsActive = v; if v then Settings.TornadoMode = false end end })
-MainTab:CreateToggle({ Name = "Rotate Parts", CurrentValue = false, Callback = function(v) Settings.RotateMode = v end })
-MainTab:CreateButton({ Name = "Throw Parts", Callback = function()
+MainTab:CreateButton({ Name = "Collect All Parts", Callback = function() Rayfield:Notify({ Title = "Done", Content = "Collected " .. CollectAllParts() .. " parts", Duration = 2 }) end })
+MainTab:CreateButton({ Name = "Drop All Parts", Callback = function() FullDrop() end })
+MainTab:CreateToggle({ Name = "Hold Parts [E]", CurrentValue = false, Callback = function(v) Settings.IsActive = v end })
+MainTab:CreateToggle({ Name = "Rotate Parts [R]", CurrentValue = false, Callback = function(v) Settings.RotateMode = v end })
+MainTab:CreateButton({ Name = "Throw Parts [Q]", Callback = function()
     if #Settings.SelectedParts == 0 then return end
     local mousePos = Mouse.Hit.Position
     for _, part in pairs(Settings.SelectedParts) do
         if part and part.Parent then part.CanCollide = true; part.Velocity = (mousePos - part.Position).Unit * Settings.ThrowForce end
     end
     Settings.SelectedParts = {}; Settings.IsActive = false; Settings.RotateMode = false
-    Rayfield:Notify({ Title = "Thrown", Content = "Части брошены", Duration = 2 })
 end })
-MainTab:CreateToggle({ Name = "Tornado Mode (Around Player)", CurrentValue = false, Callback = function(v) Settings.TornadoMode = v; if v and #AllParts == 0 then CollectAllParts() end end })
-MainTab:CreateToggle({ Name = "Fling Mode", CurrentValue = false, Callback = function(v) Settings.KillMode = v end })
+MainTab:CreateToggle({ Name = "Tornado Mode [T]", CurrentValue = false, Callback = function(v) Settings.TornadoMode = v; if v and #AllParts == 0 then CollectAllParts() end end })
+MainTab:CreateToggle({ Name = "Fling Mode [F]", CurrentValue = false, Callback = function(v) Settings.KillMode = v end })
 
--- ATTACHMENT MODE (возвращён!)
+-- ATTACHMENT
 MainTab:CreateSection("Attachment Mode")
-MainTab:CreateToggle({ Name = "Attachment Mode", CurrentValue = false, Callback = function(v)
-    Settings.AttachmentMode = v; Settings.PreviewPart = nil; Settings.PreviewPosition = nil
-    if v then Rayfield:Notify({ Title = "Attachment", Content = "Click part, then E/Q/X/Z to move, Enter to fix", Duration = 4 }) end
-end })
-MainTab:CreateSlider({ Name = "Attachment Step", Range = {0.5, 10}, Increment = 0.5, Suffix = "Studs", CurrentValue = Settings.AttachmentStep, Callback = function(v) Settings.AttachmentStep = v end })
+MainTab:CreateToggle({ Name = "Attachment Mode", CurrentValue = false, Callback = function(v) Settings.AttachmentMode = v; Settings.PreviewPart = nil end })
+MainTab:CreateSlider({ Name = "Step", Range = {0.5, 10}, Increment = 0.5, Suffix = "Studs", CurrentValue = Settings.AttachmentStep, Callback = function(v) Settings.AttachmentStep = v end })
 MainTab:CreateToggle({ Name = "Building Fling", CurrentValue = false, Callback = function(v)
     Settings.BuildingFling = v
     for _, item in pairs(Settings.AttachedParts) do
@@ -215,43 +210,33 @@ MainTab:CreateButton({ Name = "Unattach All", Callback = function()
         end
     end
     Settings.AttachedParts = {}; Settings.BuildingFling = false
-    Rayfield:Notify({ Title = "Unattached", Content = "All attachments removed", Duration = 2 })
 end })
 
 -- TORNADO TAB
 TornadoTab:CreateSection("Placed Tornadoes")
-TornadoTab:CreateToggle({ Name = "Placement Mode (Click to place)", CurrentValue = false, Callback = function(v) Settings.TornadoPlacementMode = v end })
-TornadoTab:CreateSlider({ Name = "Tornado Radius", Range = {10, 200}, Increment = 5, Suffix = "Studs", CurrentValue = Settings.PlacedTornadoRadius, Callback = function(v) Settings.PlacedTornadoRadius = v end })
-TornadoTab:CreateSlider({ Name = "Tornado Strength", Range = {1, 30}, Increment = 1, Suffix = "x", CurrentValue = Settings.PlacedTornadoStrength, Callback = function(v) Settings.PlacedTornadoStrength = v end })
-TornadoTab:CreateSlider({ Name = "Tornado Height", Range = {5, 80}, Increment = 5, Suffix = "Studs", CurrentValue = Settings.PlacedTornadoHeight, Callback = function(v) Settings.PlacedTornadoHeight = v end })
-TornadoTab:CreateSlider({ Name = "Tornado Speed", Range = {1, 20}, Increment = 1, Suffix = "rad/s", CurrentValue = Settings.PlacedTornadoSpeed, Callback = function(v) Settings.PlacedTornadoSpeed = v end })
-TornadoTab:CreateButton({ Name = "Clear All Tornadoes", Callback = function() ClearAllTornadoes(); Rayfield:Notify({ Title = "Tornadoes", Content = "All removed", Duration = 2 }) end })
+TornadoTab:CreateToggle({ Name = "Placement Mode", CurrentValue = false, Callback = function(v) Settings.TornadoPlacementMode = v end })
+TornadoTab:CreateSlider({ Name = "Radius", Range = {10, 200}, Increment = 5, CurrentValue = Settings.PlacedTornadoRadius, Callback = function(v) Settings.PlacedTornadoRadius = v end })
+TornadoTab:CreateSlider({ Name = "Strength", Range = {1, 30}, Increment = 1, CurrentValue = Settings.PlacedTornadoStrength, Callback = function(v) Settings.PlacedTornadoStrength = v end })
+TornadoTab:CreateSlider({ Name = "Height", Range = {5, 80}, Increment = 5, CurrentValue = Settings.PlacedTornadoHeight, Callback = function(v) Settings.PlacedTornadoHeight = v end })
+TornadoTab:CreateSlider({ Name = "Speed", Range = {1, 20}, Increment = 1, CurrentValue = Settings.PlacedTornadoSpeed, Callback = function(v) Settings.PlacedTornadoSpeed = v end })
+TornadoTab:CreateButton({ Name = "Clear All", Callback = ClearAllTornadoes })
 
 -- VISUAL TAB
-VisualTab:CreateSection("Highlight Unanchored Parts")
+VisualTab:CreateSection("Highlights")
 VisualTab:CreateToggle({ Name = "Highlight All Unanchored", CurrentValue = false, Callback = function(v) Settings.HighlightAll = v; UpdateHighlightAll() end })
-VisualTab:CreateButton({ Name = "Refresh Highlights", Callback = UpdateHighlightAll })
+VisualTab:CreateButton({ Name = "Refresh", Callback = UpdateHighlightAll })
 
--- PARTS LIST TAB
-local partsListLabel = ListTab:CreateParagraph({ Title = "Count", Content = "Loading..." })
-local function RefreshPartsList()
-    local parts = GetUnanchoredPartsList()
-    local text = ""; for i, part in ipairs(parts) do if i <= 50 then local dist = "?"; local char = LocalPlayer.Character; if char and char:FindFirstChild("HumanoidRootPart") then dist = math.floor((char.HumanoidRootPart.Position - part.Position).Magnitude) end; text = text .. string.format("[%d] %s | %d studs\n", i, part.Name, dist) end end
-    if #parts > 50 then text = text .. "... и ещё " .. (#parts - 50) .. " частей" end
-    partsListLabel:SetTitle("Count: " .. #parts); partsListLabel:SetContent(text)
-end
-ListTab:CreateButton({ Name = "Refresh Parts List", Callback = RefreshPartsList })
-RefreshPartsList()
-
--- ========== ОБРАБОТЧИК КЛИКОВ ==========
+-- ========== ГЛАВНЫЙ ОБРАБОТЧИК КЛИКОВ ==========
 Mouse.Button1Down:Connect(function()
-    if not Settings.MasterEnabled or not Settings.SelectionEnabled then return end
+    if not Settings.MasterEnabled then return end
 
+    -- Размещение торнадо
     if Settings.TornadoPlacementMode then
-        local pos = Mouse.Hit.Position; if not pos then return end
-        local anchor = CreateTornadoAnchor(pos)
-        table.insert(Settings.PlacedTornadoes, { Anchor = anchor, Radius = Settings.PlacedTornadoRadius, Strength = Settings.PlacedTornadoStrength, Height = Settings.PlacedTornadoHeight, Speed = Settings.PlacedTornadoSpeed })
-        Rayfield:Notify({ Title = "Tornado", Content = "Placed!", Duration = 2 })
+        local pos = Mouse.Hit.Position
+        if pos then
+            local anchor = CreateTornadoAnchor(pos)
+            table.insert(Settings.PlacedTornadoes, { Anchor = anchor, Radius = Settings.PlacedTornadoRadius, Strength = Settings.PlacedTornadoStrength, Height = Settings.PlacedTornadoHeight, Speed = Settings.PlacedTornadoSpeed })
+        end
         return
     end
 
@@ -266,7 +251,6 @@ Mouse.Button1Down:Connect(function()
             Settings.PreviewPart = target; target.CanCollide = false
             Settings.PreviewPosition = target.Position
             if not table.find(AllParts, target) then table.insert(AllParts, target) end
-            Rayfield:Notify({ Title = "Preview", Content = "E/Q/X/Z to move, Enter to fix", Duration = 3 })
         end
         return
     end
@@ -286,8 +270,7 @@ end)
 RunService.Heartbeat:Connect(function(delta)
     if not Settings.MasterEnabled then return end
 
-    -- Обновление NetworkOwner
-    if Settings.UseNetworkOwner and NetworkOwnerWorks then
+    if Settings.UseNetworkOwner and not NetworkOwnerFailed then
         networkRefreshTimer = networkRefreshTimer + delta
         if networkRefreshTimer >= Settings.NetworkRefreshInterval then
             networkRefreshTimer = 0
@@ -327,7 +310,7 @@ RunService.Heartbeat:Connect(function(delta)
         end
     end
 
-    -- Hold Parts
+    -- Удержание
     if Settings.IsActive and #Settings.SelectedParts > 0 and root then
         local mousePos = Mouse.Hit.Position
         for _, part in pairs(Settings.SelectedParts) do
@@ -335,17 +318,17 @@ RunService.Heartbeat:Connect(function(delta)
         end
     end
 
-    -- Rotate Parts
+    -- Вращение
     if Settings.RotateMode and #Settings.SelectedParts > 0 then
         for _, part in pairs(Settings.SelectedParts) do if part and part.Parent then part.AssemblyAngularVelocity = Vector3.new(0, Settings.RotateSpeed, 0) end end
     end
 
-    -- Attachment Preview (движение клавишами)
+    -- Превью закрепления
     if Settings.AttachmentMode and Settings.PreviewPart and Settings.PreviewPart.Parent then
         Settings.PreviewPart.Velocity = (Settings.PreviewPosition - Settings.PreviewPart.Position) * 15
     end
 
-    -- Building Fling
+    -- Флинг зданий
     for _, item in pairs(Settings.AttachedParts) do
         local part = item.Part
         if part and part.Parent and item.FlingEnabled and Settings.BuildingFling then
@@ -361,7 +344,6 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed or not Settings.MasterEnabled then return end
     local key = input.KeyCode
 
-    -- Режим закрепления
     if Settings.AttachmentMode and Settings.PreviewPart then
         local step = Settings.AttachmentStep
         if key == Enum.KeyCode.E then Settings.PreviewPosition += Vector3.new(0, step, 0)
@@ -369,17 +351,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         elseif key == Enum.KeyCode.X then Settings.PreviewPosition += Vector3.new(step, 0, 0)
         elseif key == Enum.KeyCode.Z then Settings.PreviewPosition += Vector3.new(-step, 0, 0)
         elseif key == Enum.KeyCode.Return then
-            local part = Settings.PreviewPart; part.Anchored = true; part.CanCollide = true; part.Velocity = Vector3.new(0,0,0); part.AssemblyAngularVelocity = Vector3.new(0,0,0)
+            local part = Settings.PreviewPart; part.Anchored = true; part.CanCollide = true; part.Velocity = Vector3.zero; part.AssemblyAngularVelocity = Vector3.zero
             table.insert(Settings.AttachedParts, { Part = part, TargetPos = Settings.PreviewPosition, FlingEnabled = false, SpinSpeed = Settings.FlingSpinSpeed })
-            Settings.PreviewPart = nil; Settings.PreviewPosition = nil; Rayfield:Notify({ Title = "Attached", Content = "Part fixed!", Duration = 2 })
+            Settings.PreviewPart = nil; Settings.PreviewPosition = nil
         elseif key == Enum.KeyCode.Backspace then
             if Settings.PreviewPart then Settings.PreviewPart.CanCollide = true end
-            Settings.PreviewPart = nil; Settings.PreviewPosition = nil; Rayfield:Notify({ Title = "Canceled", Content = "Preview canceled", Duration = 2 })
+            Settings.PreviewPart = nil; Settings.PreviewPosition = nil
         end
         return
     end
 
-    -- Обычные клавиши
     if key == Enum.KeyCode.E then if #Settings.SelectedParts > 0 then Settings.IsActive = not Settings.IsActive end
     elseif key == Enum.KeyCode.Q then
         if #Settings.SelectedParts > 0 then
@@ -414,4 +395,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Part Manipulator V6.8 loaded – All fixes applied, stable core!")
+print("Manipulator V6.8.1 Emergency Fix - Ready.")
