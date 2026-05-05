@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V6.9.2 (Force Grab from 6.8.1 + all features)
+-- Ultimate Part Manipulator V6.9.3 (No SelectionMode, One Grab Toggle)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -13,6 +13,7 @@ sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
 -- Настройки
 local Settings = {
     MasterEnabled = true,
+    GrabEnabled = true,  -- новый главный переключатель захвата
     SelectedParts = {},
     IsActive = false,
     HoldDistance = 10,
@@ -37,11 +38,10 @@ local Settings = {
     HighlightAll = false,
     HighlightColor = Color3.fromRGB(0, 255, 100),
     BuildingFling = false,
-    SelectionEnabled = true,
     MultiSelectKey = Enum.KeyCode.LeftControl,
 
     NetworkRefreshInterval = 1.0,
-    ForceGrabEnabled = true,   -- включён как в 6.8.1 для дальнего захвата
+    ForceGrabEnabled = true,
     ForceGrabDistance = 100,
 
     PlacedTornadoes = {},
@@ -68,7 +68,7 @@ local NetworkOwnerWorks = true
 local HighlightFolder = nil
 local networkRefreshTimer = 0
 
--- ПРОСТОЙ ЗАХВАТ (как в V6.8.1)
+-- Простой захват (как в V6.8.1)
 local function RetainPart(part)
     if part:IsA("BasePart") and not part.Anchored then
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then return false end
@@ -212,9 +212,9 @@ end
 -- ========== RAYFIELD UI ==========
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V6.9.2",
+    Name = "Part Manipulator V6.9.3",
     LoadingTitle = "Part Manipulator",
-    LoadingSubtitle = "Force Grab + All Features",
+    LoadingSubtitle = "Grab Toggle Only",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false
 })
@@ -227,10 +227,13 @@ local ListTab = Window:CreateTab("Parts List", 4483362458)
 MainTab:CreateSection("Master Control")
 MainTab:CreateToggle({ Name = "🔴 MASTER TOGGLE", CurrentValue = true, Callback = function(v) Settings.MasterEnabled = v; if not v then FullDrop() end end })
 
+-- НОВЫЙ ПЕРЕКЛЮЧАТЕЛЬ ЗАХВАТА
+MainTab:CreateSection("Grab Control")
+MainTab:CreateToggle({ Name = "🖱️ Grab Mode (Click to grab)", CurrentValue = true, Callback = function(v) Settings.GrabEnabled = v end })
+
 -- SETTINGS
 MainTab:CreateSection("Settings")
 MainTab:CreateToggle({ Name = "Use Network Ownership", CurrentValue = true, Callback = function(v) Settings.UseNetworkOwner = v; NetworkOwnerWorks = v end })
-MainTab:CreateToggle({ Name = "Selection Mode", CurrentValue = true, Callback = function(v) Settings.SelectionEnabled = v end })
 MainTab:CreateToggle({ Name = "Force Grab (Long Distance)", CurrentValue = true, Callback = function(v) Settings.ForceGrabEnabled = v end })
 MainTab:CreateSlider({ Name = "Network Refresh", Range = {0.1, 5.0}, Increment = 0.1, Suffix = "sec", CurrentValue = Settings.NetworkRefreshInterval, Callback = function(v) Settings.NetworkRefreshInterval = v end })
 MainTab:CreateSlider({ Name = "Throw Force", Range = {100, 5000}, Increment = 100, Suffix = "Studs/s", CurrentValue = Settings.ThrowForce, Callback = function(v) Settings.ThrowForce = v end })
@@ -332,9 +335,10 @@ ListTab:CreateButton({ Name = "Teleport", Callback = function()
 end })
 RefreshPartsList()
 
--- ========== ОБРАБОТЧИК КЛИКОВ (с Force Grab как в V6.8.1) ==========
+-- ========== ОБРАБОТЧИК КЛИКОВ (теперь только GrabEnabled) ==========
 Mouse.Button1Down:Connect(function()
-    if not Settings.MasterEnabled or not Settings.SelectionEnabled then return end
+    if not Settings.MasterEnabled then return end
+    if not Settings.GrabEnabled then return end
 
     if Settings.TornadoPlacementMode then
         local pos = Mouse.Hit.Position; if not pos then return end
@@ -348,7 +352,7 @@ Mouse.Button1Down:Connect(function()
 
     local isMulti = UserInputService:IsKeyDown(Settings.MultiSelectKey)
 
-    -- Force Grab для дальних частей (как в 6.8.1)
+    -- Force Grab для дальних частей
     if Settings.ForceGrabEnabled and Settings.UseNetworkOwner and NetworkOwnerWorks then
         local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if root then
@@ -392,7 +396,7 @@ Mouse.Button1Down:Connect(function()
     end
 end)
 
--- Перетаскивание гизмо (без изменений)
+-- Перетаскивание гизмо
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 and Settings.GizmoDragging then
         Settings.GizmoDragging = false
@@ -573,4 +577,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Part Manipulator V6.9.2 – Force Grab + All Features ready.")
+print("Part Manipulator V6.9.3 – Grab Toggle Only, Force Grab ready.")
