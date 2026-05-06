@@ -1,4 +1,4 @@
--- Ultimate Part Manipulator V6.9.3 (No SelectionMode, One Grab Toggle)
+-- Ultimate Part Manipulator V6.9.4 FINAL (Stable core + Visual Build + Tornadoes)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -10,10 +10,9 @@ local Mouse = LocalPlayer:GetMouse()
 LocalPlayer.ReplicationFocus = Workspace
 sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
 
--- Настройки
+-- Настройки (стабильное ядро из V6.8.1)
 local Settings = {
     MasterEnabled = true,
-    GrabEnabled = true,  -- новый главный переключатель захвата
     SelectedParts = {},
     IsActive = false,
     HoldDistance = 10,
@@ -28,7 +27,7 @@ local Settings = {
     FlingSpinSpeed = 500,
 
     AttachmentMode = false,
-    VisualBuildMode = false,
+    VisualBuildMode = false,   -- визуальный билдинг (мышь)
     PreviewPart = nil,
     PreviewPosition = nil,
     AttachmentStep = 2,
@@ -38,12 +37,13 @@ local Settings = {
     HighlightAll = false,
     HighlightColor = Color3.fromRGB(0, 255, 100),
     BuildingFling = false,
-    MultiSelectKey = Enum.KeyCode.LeftControl,
 
+    MultiSelectKey = Enum.KeyCode.LeftControl,
     NetworkRefreshInterval = 1.0,
-    ForceGrabEnabled = true,
+    ForceGrabEnabled = true,   -- всегда включён для дальнего захвата
     ForceGrabDistance = 100,
 
+    -- Стационарные торнадо
     PlacedTornadoes = {},
     PlacedTornadoRadius = 30,
     PlacedTornadoStrength = 8,
@@ -51,7 +51,7 @@ local Settings = {
     PlacedTornadoSpeed = 8,
     TornadoPlacementMode = false,
 
-    -- Визуальный билдинг
+    -- Визуальный билдинг (гизмо)
     GizmoActive = false,
     GizmoPart = nil,
     GizmoArrows = {},
@@ -68,7 +68,7 @@ local NetworkOwnerWorks = true
 local HighlightFolder = nil
 local networkRefreshTimer = 0
 
--- Простой захват (как в V6.8.1)
+-- ========== ПРОСТОЙ ЗАХВАТ (из V6.8.1) ==========
 local function RetainPart(part)
     if part:IsA("BasePart") and not part.Anchored then
         if part.Parent == LocalPlayer.Character or part:IsDescendantOf(LocalPlayer.Character) then return false end
@@ -112,6 +112,7 @@ local function UpdateHighlightAll()
     end
 end
 
+-- ========== СТАЦИОНАРНЫЕ ТОРНАДО ==========
 local function CreateTornadoAnchor(pos)
     local a = Instance.new("Part"); a.Name = "TAnchor"; a.Size = Vector3.new(0.5,0.5,0.5)
     a.Anchored = true; a.CanCollide = false; a.Transparency = 0.7; a.Color = Color3.fromRGB(139,0,255)
@@ -126,33 +127,7 @@ local function ClearAllTornadoes()
     Settings.PlacedTornadoes = {}
 end
 
-local function FullDrop()
-    for _, part in pairs(AllParts) do
-        if part and part.Parent then
-            part.Anchored = false; part.CanCollide = true
-            part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
-            part.Velocity = Vector3.zero; part.AssemblyAngularVelocity = Vector3.zero
-        end
-    end
-    for _, item in pairs(Settings.AttachedParts) do
-        local part = item.Part
-        if part and part.Parent then
-            part.Anchored = false; part.CanCollide = true
-            part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
-            part.Velocity = Vector3.zero; part.AssemblyAngularVelocity = Vector3.zero
-        end
-    end
-    ClearAllTornadoes()
-    AllParts = {}; Settings.SelectedParts = {}; Settings.AttachedParts = {}
-    Settings.IsActive = false; Settings.TornadoMode = false; Settings.KillMode = false
-    Settings.RotateMode = false; Settings.PreviewPart = nil; Settings.BuildingFling = false
-    Settings.GizmoActive = false; Settings.GizmoPart = nil
-    for _, a in pairs(Settings.GizmoArrows) do a:Destroy() end
-    for _, r in pairs(Settings.GizmoRings) do r:Destroy() end
-    Settings.GizmoArrows = {}; Settings.GizmoRings = {}
-end
-
--- Визуальные гизмо
+-- ========== ВИЗУАЛЬНЫЙ БИЛДИНГ (гизмо) ==========
 local function CreateGizmo(part)
     local arrows = {}
     local rings = {}
@@ -209,12 +184,35 @@ local function DestroyGizmo()
     Settings.GizmoActive = false; Settings.GizmoPart = nil
 end
 
+-- ========== ПОЛНЫЙ СБРОС ==========
+local function FullDrop()
+    for _, part in pairs(AllParts) do
+        if part and part.Parent then
+            part.Anchored = false; part.CanCollide = true
+            part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
+            part.Velocity = Vector3.zero; part.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    for _, item in pairs(Settings.AttachedParts) do
+        local part = item.Part
+        if part and part.Parent then
+            part.Anchored = false; part.CanCollide = true
+            part.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 0.5, 0.5)
+            part.Velocity = Vector3.zero; part.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    ClearAllTornadoes(); DestroyGizmo()
+    AllParts = {}; Settings.SelectedParts = {}; Settings.AttachedParts = {}
+    Settings.IsActive = false; Settings.TornadoMode = false; Settings.KillMode = false
+    Settings.RotateMode = false; Settings.PreviewPart = nil; Settings.BuildingFling = false
+end
+
 -- ========== RAYFIELD UI ==========
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
-    Name = "Part Manipulator V6.9.3",
+    Name = "Part Manipulator V6.9.4 FINAL",
     LoadingTitle = "Part Manipulator",
-    LoadingSubtitle = "Grab Toggle Only",
+    LoadingSubtitle = "Stable + Visual Build + Tornadoes",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false
 })
@@ -227,15 +225,9 @@ local ListTab = Window:CreateTab("Parts List", 4483362458)
 MainTab:CreateSection("Master Control")
 MainTab:CreateToggle({ Name = "🔴 MASTER TOGGLE", CurrentValue = true, Callback = function(v) Settings.MasterEnabled = v; if not v then FullDrop() end end })
 
--- НОВЫЙ ПЕРЕКЛЮЧАТЕЛЬ ЗАХВАТА
-MainTab:CreateSection("Grab Control")
-MainTab:CreateToggle({ Name = "🖱️ Grab Mode (Click to grab)", CurrentValue = true, Callback = function(v) Settings.GrabEnabled = v end })
-
 -- SETTINGS
 MainTab:CreateSection("Settings")
 MainTab:CreateToggle({ Name = "Use Network Ownership", CurrentValue = true, Callback = function(v) Settings.UseNetworkOwner = v; NetworkOwnerWorks = v end })
-MainTab:CreateToggle({ Name = "Force Grab (Long Distance)", CurrentValue = true, Callback = function(v) Settings.ForceGrabEnabled = v end })
-MainTab:CreateSlider({ Name = "Network Refresh", Range = {0.1, 5.0}, Increment = 0.1, Suffix = "sec", CurrentValue = Settings.NetworkRefreshInterval, Callback = function(v) Settings.NetworkRefreshInterval = v end })
 MainTab:CreateSlider({ Name = "Throw Force", Range = {100, 5000}, Increment = 100, Suffix = "Studs/s", CurrentValue = Settings.ThrowForce, Callback = function(v) Settings.ThrowForce = v end })
 MainTab:CreateSlider({ Name = "Hold Distance", Range = {3, 30}, Increment = 1, Suffix = "Studs", CurrentValue = Settings.HoldDistance, Callback = function(v) Settings.HoldDistance = v end })
 MainTab:CreateSlider({ Name = "Fling Spin Speed", Range = {100, 2000}, Increment = 50, Suffix = "rad/s", CurrentValue = Settings.FlingSpinSpeed, Callback = function(v) Settings.FlingSpinSpeed = v end })
@@ -265,7 +257,7 @@ MainTab:CreateToggle({ Name = "Visual Build Mode (Mouse drag)", CurrentValue = f
     Settings.PreviewPart = nil
     if v then
         Settings.AttachmentMode = false
-        Rayfield:Notify({ Title = "Visual Build", Content = "Click part to select, drag arrows to move, Tab to rotate", Duration = 4 })
+        Rayfield:Notify({ Title = "Visual Build", Content = "Click part, drag arrows. Tab = rotate, Enter = fix", Duration = 4 })
     else
         DestroyGizmo()
     end
@@ -295,12 +287,12 @@ end })
 
 -- TORNADO TAB
 TornadoTab:CreateSection("Placed Tornadoes")
-TornadoTab:CreateToggle({ Name = "Placement Mode", CurrentValue = false, Callback = function(v) Settings.TornadoPlacementMode = v end })
+TornadoTab:CreateToggle({ Name = "Placement Mode (Click map)", CurrentValue = false, Callback = function(v) Settings.TornadoPlacementMode = v end })
 TornadoTab:CreateSlider({ Name = "Radius", Range = {10, 200}, Increment = 5, CurrentValue = Settings.PlacedTornadoRadius, Callback = function(v) Settings.PlacedTornadoRadius = v end })
 TornadoTab:CreateSlider({ Name = "Strength", Range = {1, 30}, Increment = 1, CurrentValue = Settings.PlacedTornadoStrength, Callback = function(v) Settings.PlacedTornadoStrength = v end })
 TornadoTab:CreateSlider({ Name = "Height", Range = {5, 80}, Increment = 5, CurrentValue = Settings.PlacedTornadoHeight, Callback = function(v) Settings.PlacedTornadoHeight = v end })
 TornadoTab:CreateSlider({ Name = "Speed", Range = {1, 20}, Increment = 1, CurrentValue = Settings.PlacedTornadoSpeed, Callback = function(v) Settings.PlacedTornadoSpeed = v end })
-TornadoTab:CreateButton({ Name = "Clear All", Callback = ClearAllTornadoes })
+TornadoTab:CreateButton({ Name = "Clear All Tornadoes", Callback = ClearAllTornadoes })
 
 -- VISUAL TAB
 VisualTab:CreateSection("Highlights")
@@ -335,15 +327,40 @@ ListTab:CreateButton({ Name = "Teleport", Callback = function()
 end })
 RefreshPartsList()
 
--- ========== ОБРАБОТЧИК КЛИКОВ (теперь только GrabEnabled) ==========
+-- ========== ОБРАБОТЧИК КЛИКОВ (стабильный захват + Force Grab) ==========
 Mouse.Button1Down:Connect(function()
     if not Settings.MasterEnabled then return end
-    if not Settings.GrabEnabled then return end
 
+    -- Размещение стационарного торнадо
     if Settings.TornadoPlacementMode then
-        local pos = Mouse.Hit.Position; if not pos then return end
-        table.insert(Settings.PlacedTornadoes, { Anchor = CreateTornadoAnchor(pos), Radius = Settings.PlacedTornadoRadius, Strength = Settings.PlacedTornadoStrength, Height = Settings.PlacedTornadoHeight, Speed = Settings.PlacedTornadoSpeed })
+        local pos = Mouse.Hit.Position
+        if pos then
+            table.insert(Settings.PlacedTornadoes, { Anchor = CreateTornadoAnchor(pos), Radius = Settings.PlacedTornadoRadius, Strength = Settings.PlacedTornadoStrength, Height = Settings.PlacedTornadoHeight, Speed = Settings.PlacedTornadoSpeed })
+        end
         return
+    end
+
+    -- Визуальный билдинг: клик по стрелке гизмо
+    if Settings.VisualBuildMode and Settings.GizmoActive then
+        local target = Mouse.Target
+        for axis, arrow in pairs(Settings.GizmoArrows) do
+            if target == arrow then
+                Settings.GizmoDragging = true
+                Settings.GizmoAxis = axis
+                Settings.GizmoDragStart = Mouse.Hit.Position
+                Settings.GizmoPartStart = Settings.GizmoPart.CFrame
+                return
+            end
+        end
+        for axis, ring in pairs(Settings.GizmoRings) do
+            if target == ring and ring.Visible then
+                Settings.GizmoDragging = true
+                Settings.GizmoAxis = axis
+                Settings.GizmoDragStart = Mouse.Hit.Position
+                Settings.GizmoPartStart = Settings.GizmoPart.CFrame
+                return
+            end
+        end
     end
 
     local target = Mouse.Target
@@ -352,7 +369,7 @@ Mouse.Button1Down:Connect(function()
 
     local isMulti = UserInputService:IsKeyDown(Settings.MultiSelectKey)
 
-    -- Force Grab для дальних частей
+    -- Force Grab (дальний захват, всегда активен)
     if Settings.ForceGrabEnabled and Settings.UseNetworkOwner and NetworkOwnerWorks then
         local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if root then
@@ -366,6 +383,7 @@ Mouse.Button1Down:Connect(function()
         end
     end
 
+    -- Визуальный билдинг: захват новой части
     if Settings.VisualBuildMode then
         if RetainPart(target) then
             Settings.PreviewPart = target; target.CanCollide = false
@@ -376,6 +394,7 @@ Mouse.Button1Down:Connect(function()
         return
     end
 
+    -- Клавиатурный режим закрепления
     if Settings.AttachmentMode then
         if RetainPart(target) then
             Settings.PreviewPart = target; target.CanCollide = false
@@ -385,6 +404,7 @@ Mouse.Button1Down:Connect(function()
         return
     end
 
+    -- Обычный захват
     if RetainPart(target) then
         if isMulti then
             if not table.find(Settings.SelectedParts, target) and #Settings.SelectedParts < 100 then
@@ -396,7 +416,7 @@ Mouse.Button1Down:Connect(function()
     end
 end)
 
--- Перетаскивание гизмо
+-- Отпускание мыши (конец перетаскивания гизмо)
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 and Settings.GizmoDragging then
         Settings.GizmoDragging = false
@@ -408,6 +428,7 @@ end)
 RunService.Heartbeat:Connect(function(delta)
     if not Settings.MasterEnabled then return end
 
+    -- Периодическое обновление NetworkOwner
     if Settings.UseNetworkOwner and NetworkOwnerWorks then
         networkRefreshTimer = networkRefreshTimer + delta
         if networkRefreshTimer >= Settings.NetworkRefreshInterval then
@@ -466,7 +487,7 @@ RunService.Heartbeat:Connect(function(delta)
         Settings.PreviewPart.Velocity = (Settings.PreviewPosition - Settings.PreviewPart.Position) * 15
     end
 
-    -- Визуальный билдинг: обновление позиций гизмо и перетаскивание
+    -- Визуальный билдинг: позиционирование гизмо и перетаскивание
     if Settings.VisualBuildMode and Settings.GizmoPart then
         UpdateGizmoPosition()
         if Settings.GizmoDragging and Settings.GizmoAxis then
@@ -507,6 +528,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed or not Settings.MasterEnabled then return end
     local key = input.KeyCode
 
+    -- Визуальный билдинг: Tab/Enter/Backspace
     if Settings.VisualBuildMode and Settings.GizmoPart then
         if key == Enum.KeyCode.Tab then Settings.GizmoRotateMode = not Settings.GizmoRotateMode; return
         elseif key == Enum.KeyCode.Return then
@@ -523,6 +545,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         end
     end
 
+    -- Клавиатурный режим закрепления
     if Settings.AttachmentMode and Settings.PreviewPart then
         local step = Settings.AttachmentStep
         if key == Enum.KeyCode.E then Settings.PreviewPosition += Vector3.new(0, step, 0)
@@ -540,6 +563,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         return
     end
 
+    -- Стандартные горячие клавиши
     if key == Enum.KeyCode.E then if #Settings.SelectedParts > 0 then Settings.IsActive = not Settings.IsActive end
     elseif key == Enum.KeyCode.Q then
         if #Settings.SelectedParts > 0 then
@@ -577,4 +601,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Part Manipulator V6.9.3 – Grab Toggle Only, Force Grab ready.")
+print("Part Manipulator V6.9.4 FINAL – Stable core + Visual Build + Tornadoes ready.")
